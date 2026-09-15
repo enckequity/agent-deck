@@ -100,6 +100,10 @@ notifications target browsers/PWAs. Nothing to reuse.
 3. **Deck defers replies to busy sessions** (`fix(macos): defer replies to busy
    sessions …`). Uses native `agent-deck session send --defer-if-busy` so a reply
    lands at the turn boundary instead of interrupting generation.
+4. **`deck-task` asserts the native completion sentinel** (`feat(macos): have
+   deck-task assert agent-deck's status sentinel`). Passes `launch --assert-done`
+   for both tools so completions reach agent-deck's ledger and the parent inbox;
+   paired with the `agents-sync` `isTerminal` fix (PR #48).
 
 Already native before this work: session start (`session start`), replies
 (`session send`), archive (`session archive`), and the TUI-facing session list
@@ -119,13 +123,16 @@ Already native before this work: session start (`session start`), replies
 - **`deck-task` prompt and free-disk guard**: task-specific content agent-deck has
   no opinion on (the guard is surfaced through Deck's error UI).
 
-## Recommended follow-up (not done here)
+## Completion sentinel (now wired)
 
-agent-deck's native sentinel parser (`ParseDoneSentinel`) requires
-`status=<ok|fail>`, but `agents-sync/hooks/auto-continue-core.mjs` `isTerminal`
-accepts only a bare `===AGENTDECK_DONE===` line. So agent-deck's completion ledger
-never sees a deck-task worker as *done* — only as *waiting*. Allowing the native
-`status=…` suffix in `isTerminal` (a one-line change in `agents-sync`) would let
-`deck-task` pass `launch --assert-done` and make completions visible to
-`session children` / the parent inbox. Left out because it touches the shared
-hooks repo that other running agents depend on.
+`deck-task` passes `launch --assert-done` for **both** tools (agent-deck defaults it
+on for `-c claude` only), so a worker ends its turn with agent-deck's own
+`===AGENTDECK_DONE=== status=<ok|fail> summary=<…>`.
+
+That sentinel now satisfies both consumers. agent-deck's completion ledger parses it
+(`ParseDoneSentinel`) so `session children` / the parent inbox carry the completion
+up. And the auto-continue hook accepts it: `agents-sync/hooks/auto-continue-core.mjs`
+`isTerminal` was extended to take the `status=…` form, mirroring `ParseDoneSentinel`
+(agents-sync PR #48, with `node --test hooks/` coverage). Before that, `isTerminal`
+took only a bare `===AGENTDECK_DONE===`, so a `--assert-done` worker finished as
+*waiting* to agent-deck and the hook nudged it forever.
