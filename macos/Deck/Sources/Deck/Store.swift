@@ -239,7 +239,9 @@ final class Store: ObservableObject {
             let start = await CLI.run(CLI.agentDeck, ["session", "start", task.id], login: true)
             if !start.ok { return start.reason }
         }
-        let result = await CLI.run(CLI.agentDeck, ["session", "send", task.id, text], login: true)
+        var args = ["session", "send", task.id, text]
+        if task.phase == .working { args.append("--defer-if-busy") }
+        let result = await CLI.run(CLI.agentDeck, args, login: true)
         requestRefresh()
         return result.ok ? nil : result.reason
     }
