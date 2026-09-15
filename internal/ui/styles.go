@@ -117,8 +117,14 @@ func InitTheme(theme string) {
 		ColorRed = darkColors.Red
 		ColorComment = darkColors.Comment
 	}
+	if minimalUI {
+		applyMinimalPalette()
+	}
 	// Reinitialize styles with new colors
 	initStyles()
+	if minimalUI {
+		applyMinimalStyles()
+	}
 }
 
 // GetCurrentTheme returns the active theme
