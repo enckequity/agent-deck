@@ -233,12 +233,7 @@ struct TaskDetail: View {
                     Button("Show in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: task.path)])
                     }
-                    if !task.branch.isEmpty {
-                        Button("Copy Branch Name") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(task.branch, forType: .string)
-                        }
-                    }
+                    Button("Copy Branch Name") { store.copyBranch(task) }
                     Divider()
                     Button("Archive", role: .destructive) { confirmArchive = true }
                 } label: {

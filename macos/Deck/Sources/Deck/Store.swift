@@ -10,7 +10,6 @@ struct DeckTask: Identifiable, Equatable {
     let id: String
     let title: String
     let repo: String
-    let branch: String
     let path: String
     let tool: String
     let status: String
@@ -177,16 +176,10 @@ final class Store: ObservableObject {
             }
         }
         let url = URL(fileURLWithPath: s.path)
-        let worktreeRoot = "\(CLI.home)/dev/worktrees/"
         var repoName = s.group.isEmpty ? url.lastPathComponent : s.group
-        var branch = ""
-        if s.path.hasPrefix(worktreeRoot) {
-            let parts = s.path.dropFirst(worktreeRoot.count).split(separator: "/")
-            if parts.count >= 2 { branch = parts.dropFirst().joined(separator: "/") }
-        }
         if repoName == "teamshift" { repoName = "TeamShift" }
         if repoName == "enck-os" { repoName = "Enck OS" }
-        return DeckTask(id: s.id, title: conversation?.title ?? Self.prettyTitle(s.title), repo: repoName, branch: branch,
+        return DeckTask(id: s.id, title: conversation?.title ?? Self.prettyTitle(s.title), repo: repoName,
                         path: s.path, tool: s.tool, status: s.status,
                         created: Self.parseDate(s.created_at), phase: phase, note: note)
     }
@@ -251,6 +244,17 @@ final class Store: ObservableObject {
         return result.ok ? nil : result.reason
     }
 
+    /// Copies the task's branch using agent-deck's native `worktree info` rather
+    /// than inferring it from the worktree path (which the native creator sanitizes).
+    func copyBranch(_ task: DeckTask) {
+        Task {
+            let result = await CLI.deck("worktree", "info", task.id, "--json")
+            guard let info = try? JSONDecoder().decode(RawWorktreeInfo.self, from: result.stdout), !info.branch.isEmpty else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(info.branch, forType: .string)
+        }
+    }
+
     func archive(_ task: DeckTask) {
         Task {
             _ = await CLI.deck("session", "archive", task.id)
@@ -311,4 +315,8 @@ struct RawSession: Decodable {
 
 private struct RawOutput: Decodable {
     let content: String?
+}
+
+private struct RawWorktreeInfo: Decodable {
+    let branch: String
 }
