@@ -1869,6 +1869,7 @@ func NewHomeWithProfileAndMode(profile string) *Home {
 		h.remoteLatencyRefreshSec = cfg.UI.GetRemoteLatencyRefreshSecs(cfg.SystemStats.GetRefreshSeconds())
 		h.remoteSessionRefreshSec = cfg.UI.GetRemoteSessionRefreshSecs()
 		h.footerMode = cfg.UI.GetFooter()
+		setMinimalUI(cfg.UI.GetStyle() == session.UIStyleMinimal)
 		h.attachOnCreate = cfg.UI.GetAttachOnCreate()
 	} else {
 		h.fullRepaint = (session.DisplaySettings{}).GetFullRepaint()
@@ -3443,6 +3444,9 @@ func (h *Home) syncViewport() {
 	// Panel content: contentHeight - 2 lines
 	helpBarHeight := 2
 	panelTitleLines := 2 // SESSIONS title + underline (matches View())
+	if minimalUI {
+		panelTitleLines = minimalPanelTitleLines
+	}
 
 	// Filter bar is always shown for consistent layout (matches View())
 	filterBarHeight := 1
@@ -3692,6 +3696,9 @@ func (h *Home) cleanupNotifications() {
 func (h *Home) getVisibleHeight() int {
 	helpBarHeight := 2
 	panelTitleLines := 2
+	if minimalUI {
+		panelTitleLines = minimalPanelTitleLines
+	}
 	filterBarHeight := 1
 	updateBannerHeight := 0
 	if h.shouldRenderUpdateBanner() {
@@ -9289,6 +9296,7 @@ func (h *Home) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Apply theme changes live
 				h.stopThemeWatcher()
 				resolvedTheme := session.ResolveTheme()
+				setMinimalUI(config.UI.GetStyle() == session.UIStyleMinimal)
 				InitTheme(resolvedTheme)
 				h.propagateThemeToSessions()
 				var themeCmd tea.Cmd
@@ -10481,6 +10489,9 @@ func (h *Home) getListContentStartY() int {
 	}
 	// Panel title: 2 lines (title + underline)
 	startY += 2
+	if minimalUI {
+		startY += minimalPanelTitleLines - 2
+	}
 	return startY
 }
 
@@ -17141,6 +17152,9 @@ func (h *Home) countSessionStatuses() (running, waiting, idle, stopped, errored 
 // renderFilterBar renders the quick filter pills
 // Format: [All] [● Running 2] [◐ Waiting 1] [○ Idle 5] [■ Stopped 1] [✕ Error 1]
 func (h *Home) renderFilterBar() string {
+	if minimalUI {
+		return h.renderFilterBarMinimalUI()
+	}
 	running, waiting, idle, stopped, errored := h.countSessionStatuses()
 
 	// Pill styling
@@ -17602,6 +17616,9 @@ func (h *Home) renderFrame() string {
 		Padding(0, 1).
 		Render(headerContent)
 
+	if minimalUI {
+		headerBar = h.renderHeaderMinimalUI()
+	}
 	b.WriteString(headerBar)
 	b.WriteString("\n")
 
@@ -17625,6 +17642,9 @@ func (h *Home) renderFrame() string {
 			Bold(true).
 			MaxWidth(h.width).
 			Align(lipgloss.Center)
+		if minimalUI {
+			updateStyle = minimalBannerStyle(h.width)
+		}
 		b.WriteString(updateStyle.Render(h.renderUpdateBannerText()))
 		b.WriteString("\n")
 	}
@@ -17641,6 +17661,9 @@ func (h *Home) renderFrame() string {
 			Bold(true).
 			MaxWidth(h.width).
 			Align(lipgloss.Center)
+		if minimalUI {
+			maintStyle = minimalBannerStyle(h.width)
+		}
 		b.WriteString(maintStyle.Render(" " + h.maintenanceMsg + " "))
 		b.WriteString("\n")
 	}
@@ -17701,6 +17724,9 @@ func (h *Home) renderFrame() string {
 		dismissHint := lipgloss.NewStyle().Foreground(ColorText).Render(
 			fmt.Sprintf(" (auto-dismiss in %ds)", int(remaining.Seconds())+1))
 		errMsg := ErrorStyle.Render("⚠ "+h.err.Error()) + dismissHint
+		if minimalUI {
+			errMsg = renderErrorMinimalUI(h.err, h.width)
+		}
 		b.WriteString("\n")
 		b.WriteString(errMsg)
 	}
@@ -17939,6 +17965,9 @@ type EmptyStateConfig struct {
 // renderEmptyStateResponsive creates a centered empty state that adapts to available space
 // Uses progressive disclosure: full → compact → minimal based on width/height
 func renderEmptyStateResponsive(config EmptyStateConfig, width, height int) string {
+	if minimalUI {
+		return renderEmptyStateMinimalUI(config, width, height)
+	}
 	// Determine content tier based on available space
 	// Use the more restrictive of width or height constraints
 	tier := "full"
@@ -18192,6 +18221,9 @@ func ensureExactWidth(content string, width int) string {
 
 // renderDualColumnLayout renders side-by-side panels for wide terminals (80+ cols)
 func (h *Home) renderDualColumnLayout(contentHeight int) string {
+	if minimalUI {
+		return h.renderDualColumnLayoutMinimalUI(contentHeight)
+	}
 	var b strings.Builder
 
 	// Calculate panel widths from configurable split (issue #1092 — [ui] preview_pct)
@@ -18288,6 +18320,9 @@ func (h *Home) renderDualColumnLayout(contentHeight int) string {
 
 // renderStackedLayout renders list above preview for medium terminals (50-79 cols)
 func (h *Home) renderStackedLayout(totalHeight int) string {
+	if minimalUI {
+		return h.renderStackedLayoutMinimalUI(totalHeight)
+	}
 	var b strings.Builder
 
 	// Split height by previewPct so < / > adjust the vertical split the
@@ -18326,6 +18361,9 @@ func (h *Home) renderStackedLayout(totalHeight int) string {
 
 // renderSingleColumnLayout renders list only for narrow terminals (<50 cols)
 func (h *Home) renderSingleColumnLayout(totalHeight int) string {
+	if minimalUI {
+		return h.renderSingleColumnLayoutMinimalUI(totalHeight)
+	}
 	var b strings.Builder
 
 	// Full height for list
@@ -18345,6 +18383,9 @@ func (h *Home) renderSingleColumnLayout(totalHeight int) string {
 // renderSectionDivider creates a modern section divider with optional centered label
 // Format: ─────────── Label ─────────── (lines extend to fill width)
 func renderSectionDivider(label string, width int) string {
+	if minimalUI {
+		return renderSectionDividerMinimalUI(label)
+	}
 	lineStyle := lipgloss.NewStyle().Foreground(ColorBorder)
 
 	if label == "" {
@@ -18577,6 +18618,9 @@ func renderSimpleMCPLine(b *strings.Builder, mcpInfo *session.MCPInfo, width int
 // The very-narrow tiny tier is always used below layoutBreakpointSingle so the
 // bar never overflows, whatever the configured style.
 func (h *Home) renderHelpBar() string {
+	if minimalUI {
+		return h.renderHelpBarMinimalUI()
+	}
 	if h.width < layoutBreakpointSingle {
 		return h.renderHelpBarTiny()
 	}
@@ -19388,6 +19432,9 @@ func (h *Home) renderDebugBar() string {
 func (h *Home) renderSessionList(width, height int) string {
 	var b strings.Builder
 
+	if len(h.flatItems) == 0 && minimalUI {
+		return h.renderSessionListEmptyMinimalUI(width, height)
+	}
 	if len(h.flatItems) == 0 {
 		// Responsive empty state - adapts to available space
 		// Account for border (2 chars each side) when calculating content area
@@ -19601,6 +19648,9 @@ func (h *Home) renderItem(
 	snapshot map[string]sessionRenderState,
 	listWidth int,
 ) {
+	if minimalUI && h.renderItemMinimalUI(b, item, selected, groupStats, snapshot, listWidth) {
+		return
+	}
 	switch item.Type {
 	case session.ItemTypeGroup:
 		h.renderGroupItem(b, item, selected, itemIndex, groupStats)
@@ -21110,6 +21160,10 @@ func (h *Home) renderPreviewPane(width, height int) string {
 	b.WriteString(" ")
 	b.WriteString(groupBadge)
 	b.WriteString("\n")
+	if minimalUI {
+		b.Reset()
+		b.WriteString(h.renderPreviewHeaderMinimalUI(selected, selectedStatus, activityStr, width))
+	}
 
 	// Agent card. When the selected session belongs to an adopted agent, its
 	// role, triggers, connector health and recent ledger entries render here
@@ -21617,6 +21671,9 @@ func (h *Home) renderPreviewPane(width, height int) string {
 	}
 
 	// Special handling for stopped state - user-intentional stop with resume guidance
+	if selectedStatus == session.StatusStopped && minimalUI {
+		return h.renderNotRunningMinimalUI(&b, selectedStatus, height)
+	}
 	if selectedStatus == session.StatusStopped {
 		stoppedHeader := renderSectionDivider("Session Stopped", width-4)
 		b.WriteString(stoppedHeader)
@@ -21686,6 +21743,9 @@ func (h *Home) renderPreviewPane(width, height int) string {
 	}
 
 	// Special handling for error state - crash/unexpected failure with diagnostic guidance
+	if selectedStatus == session.StatusError && minimalUI {
+		return h.renderNotRunningMinimalUI(&b, selectedStatus, height)
+	}
 	if selectedStatus == session.StatusError {
 		errorHeader := renderSectionDivider("Session Error", width-4)
 		b.WriteString(errorHeader)
@@ -22413,6 +22473,9 @@ func formatRelativeTime(t time.Time) string {
 
 // renderGroupPreview renders the preview pane for a group
 func (h *Home) renderGroupPreview(group *session.Group, width, height int) string {
+	if minimalUI {
+		return h.renderGroupPreviewMinimalUI(group, width, height)
+	}
 	var b strings.Builder
 
 	// Group header with folder icon
