@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# deck-task — start an autonomous coding session in agent-deck, one command per task.
+#
+#   deck-task "fix the portal login redirect loop"          # opencode + DeepSeek (cheap)
+#   deck-task -c claude "redesign the billing webhook"      # Claude Code (Opus)
+#   deck-task -r enck-os "add dark mode to settings"        # other repo (teamshift|enck-os|path)
+#   deck-task -p "draft the new onboarding copy"            # open a PR but don't merge
+#
+# Each task gets a fresh worktree off origin/main on its own branch (<tool>/<slug>),
+# shows up in Deck (~/Applications/Deck.app) and the agent-deck TUI, and runs end to end:
+# implement, verify, PR, review, merge. It keeps working until it ends with
+# ===AGENTDECK_DONE===, BLOCKED: or WAITING: (auto-continue hooks). -p stops at the PR.
+set -euo pipefail
+
+tool=opencode
+repo=teamshift
+merge=1
+min_free_gib=${DECK_MIN_FREE_GIB:-8}
+
+usage() { sed -n 2,12p "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+while getopts "c:r:ph" opt; do
+  case $opt in
+    c) tool=$OPTARG ;;
+    r) repo=$OPTARG ;;
+    p) merge=0 ;;
+    h) usage ;;
+    *) usage 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+task=${*:-}
+[ -n "$task" ] || usage 2
+
+case $tool in claude|opencode) ;; *) echo "deck-task: -c must be claude or opencode" >&2; exit 2 ;; esac
+case $repo in
+  teamshift) group=teamshift; root=$HOME/dev/agentos-modular-monorepo ;;
+  enck-os) group=enck-os; root=$HOME/dev/enck-os ;;
+  *) root=$(cd "$repo" && git rev-parse --show-toplevel); group=$(basename "$root") ;;
+esac
+
+free_gib=$(df -g "$HOME" | awk 'NR==2 {print $4}')
+if [ "$free_gib" -lt "$min_free_gib" ]; then
+  echo "deck-task: only ${free_gib}GiB free (need ${min_free_gib}); run ~/bin/git-tidy.sh or set DECK_MIN_FREE_GIB" >&2
+  exit 1
+fi
+
+slug=$(printf '%s' "$task" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -d- -f1-5 | sed 's/-$//')
+branch="$tool/${slug:-task}-$(date +%m%d%H%M)"
+
+if [ "$merge" = 1 ]; then
+  finish="4. Merge it yourself once verified: gh pr merge --squash --delete-branch (add --admin only when a disabled required check blocks a locally verified PR). If main moved, rebase onto origin/main, re-run the affected checks, push and retry. Confirm gh pr view --json state says MERGED before you finish, and put the PR URL in your final message."
+else
+  finish="4. Do not merge; finish with the PR URL in your final message."
+fi
+prompt="$task
+
+Context: you are in a fresh git worktree on branch $branch. Nobody is watching this session, so answer your own questions with the reasonable reversible choice and keep going.
+Follow the repo's AGENTS.md/CLAUDE.md, and search shared memory (Hindsight) before assuming context is missing. Deliver end to end:
+1. Implement and verify with the repo's canonical local checks. GitHub Actions are not a verification surface.
+2. Commit with conventional commits, push, and open a PR with the verification evidence.
+3. Have a fresh-context reviewer subagent check the diff against the task; fix blocking findings and any PR review comments, then re-run the affected checks.
+$finish
+When you must wait on something, use one blocking watch command (for example gh pr checks <n> --watch) or end with WAITING: <what>; never loop on sleep. Stop with BLOCKED: <reason> only for production data changes, secrets, spending money or messages to people."
+
+# git worktree + branch creation, base resolution and the path template are native
+# agent-deck features (--worktree/--new-branch); agent-deck registers the worktree
+# against the session so `worktree info`/`finish` work. Idle sessions stop after 30m
+# to spare memory; resume any from the dashboard.
+args=(launch "$root" -c "$tool" -g "$group" -t "${slug:-task}" -w "$branch" -b --title-lock --no-parent --idle-timeout=30m -m "$prompt")
+[ "$tool" = claude ] && args+=(--skip-permissions)
+agent-deck "${args[@]}"
+echo "deck-task: $branch → attach with: agent-deck (group $group)"
