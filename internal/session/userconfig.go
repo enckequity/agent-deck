@@ -458,6 +458,11 @@ type UISettings struct {
 	// `add`/`session start` are unaffected by this flag — they attach only
 	// with an explicit `--attach`.
 	AttachOnCreate bool `toml:"attach_on_create,omitempty"`
+
+	// Style selects the home-screen look. "minimal" renders a calm,
+	// low-glyph list (see internal/ui/minimal.go). Empty or unknown values
+	// keep the upstream look.
+	Style string `toml:"style,omitempty"`
 }
 
 // normalizeUIHiddenTools lowercases, dedupes, and drops unknown entries from
@@ -545,6 +550,17 @@ const (
 	// config.toml [ui] footer.
 	DefaultFooter = FooterFull
 )
+
+// UIStyleMinimal is the [ui] style value that enables the minimal home screen.
+const UIStyleMinimal = "minimal"
+
+// GetStyle returns the configured [ui] style, normalized to "" or UIStyleMinimal.
+func (u UISettings) GetStyle() string {
+	if strings.EqualFold(strings.TrimSpace(u.Style), UIStyleMinimal) {
+		return UIStyleMinimal
+	}
+	return ""
+}
 
 // GetFooter returns the configured footer style, normalized to one of the
 // known values. Empty or unknown input falls back to DefaultFooter
