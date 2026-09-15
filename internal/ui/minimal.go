@@ -564,6 +564,19 @@ func (h *Home) renderPreviewHeaderMinimalUI(selected *session.Instance, status s
 	return b.String()
 }
 
+// dropPreviewDetailMinimalUI discards the worktree, multi-repo and per-tool
+// detail sections (session IDs, MCPs, model, status) written after keep; the
+// tool is already on the meta line. A worktree keeps one dim branch line. The
+// caller's following newline terminates the last kept line.
+func (h *Home) dropPreviewDetailMinimalUI(b *strings.Builder, keep string, selected *session.Instance, width int) {
+	b.Reset()
+	b.WriteString(strings.TrimSuffix(keep, "\n"))
+	if selected.IsWorktree() && selected.WorktreeBranch != "" {
+		b.WriteString("\n")
+		b.WriteString(minimalDim().Render(cellTruncate("branch "+selected.WorktreeBranch, max(1, width-2), "…")))
+	}
+}
+
 // renderSectionDividerMinimalUI replaces `─── Label ───` with a blank line and
 // a dim lowercase label.
 func renderSectionDividerMinimalUI(label string) string {
@@ -576,6 +589,7 @@ func renderSectionDividerMinimalUI(label string) string {
 // renderNotRunningMinimalUI replaces the stopped and error panels with two
 // lines: what happened, and the keys that fix it.
 func (h *Home) renderNotRunningMinimalUI(b *strings.Builder, status session.Status, height int) string {
+	b.WriteString("\n")
 	if status == session.StatusStopped {
 		b.WriteString(minimalDim().Render("stopped"))
 	} else {

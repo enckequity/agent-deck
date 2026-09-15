@@ -127,6 +127,7 @@ func assertMinimalFrame(t *testing.T, frame string, width, height int) {
 		"📁", "⏱", "📌", "⬢", "🔒", "⚡", "├", "└", "▶", "▾", "1·",
 		"SESSIONS", "PREVIEW", "This can happen if",
 		"!@#", "filter •", "auto-dismiss", "⟨", "Agent Deck",
+		"Status:", "Model:", "Not connected",
 	}
 	for _, s := range banned {
 		if strings.Contains(frame, s) {
@@ -216,5 +217,23 @@ func TestMinimalUI_SelectedRowSpansWidth(t *testing.T) {
 	}
 	if !strings.Contains(row, "48;") {
 		t.Errorf("selected row has no background color: %q", row)
+	}
+}
+
+// TestMinimalUI_WorktreeIsOneBranchLine: the worktree section collapses to a
+// single dim branch line, and no per-tool detail block renders.
+func TestMinimalUI_WorktreeIsOneBranchLine(t *testing.T) {
+	home := newMinimalTestHome(t, 120, 32, "review pricing page", false)
+	sel := home.flatItems[home.cursor].Session
+	sel.WorktreePath = "/tmp/wt/pricing"
+	sel.WorktreeBranch = "feat/pricing"
+	preview := tmux.StripANSI(home.renderPreviewPane(80, 28))
+	if strings.Count(preview, "branch feat/pricing") != 1 {
+		t.Errorf("preview should carry exactly one branch line:\n%s", preview)
+	}
+	for _, banned := range []string{"worktree", "Branch:", "Status:", "Model:", "claude\n"} {
+		if strings.Contains(preview, banned) {
+			t.Errorf("preview contains %q:\n%s", banned, preview)
+		}
 	}
 }

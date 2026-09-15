@@ -21174,6 +21174,7 @@ func (h *Home) renderPreviewPane(width, height int) string {
 		b.WriteString(h.renderAgentCard(agentRow, width))
 	}
 
+	minimalPreviewKeep := b.String()
 	// Worktree info section (for sessions running in git worktrees)
 	if selected.IsWorktree() {
 		wtHeader := renderSectionDivider("Worktree", width-4)
@@ -21646,6 +21647,9 @@ func (h *Home) renderPreviewPane(width, height int) string {
 		}
 	}
 
+	if minimalUI {
+		h.dropPreviewDetailMinimalUI(&b, minimalPreviewKeep, selected, width)
+	}
 	b.WriteString("\n")
 
 	// Check preview settings for what to show
