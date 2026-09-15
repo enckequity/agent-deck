@@ -64,9 +64,11 @@ When you must wait on something, use one blocking watch command (for example gh 
 
 # git worktree + branch creation, base resolution and the path template are native
 # agent-deck features (--worktree/--new-branch); agent-deck registers the worktree
-# against the session so `worktree info`/`finish` work. Idle sessions stop after 30m
-# to spare memory; resume any from the dashboard.
-args=(launch "$root" -c "$tool" -g "$group" -t "${slug:-task}" -w "$branch" -b --title-lock --no-parent --idle-timeout=30m -m "$prompt")
+# against the session so `worktree info`/`finish` work. --assert-done is passed for
+# both tools (agent-deck defaults it on for claude only) so the worker ends with
+# agent-deck's native status=<ok|fail> sentinel and its completion reaches the
+# ledger. Idle sessions stop after 30m to spare memory; resume any from the dashboard.
+args=(launch "$root" -c "$tool" -g "$group" -t "${slug:-task}" -w "$branch" -b --title-lock --no-parent --assert-done --idle-timeout=30m -m "$prompt")
 [ "$tool" = claude ] && args+=(--skip-permissions)
 agent-deck "${args[@]}"
 echo "deck-task: $branch → attach with: agent-deck (group $group)"
