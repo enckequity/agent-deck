@@ -17,9 +17,10 @@ import (
 )
 
 const (
-	ConductorAgentClaude = "claude"
-	ConductorAgentCodex  = "codex"
-	ConductorAgentHermes = "hermes"
+	ConductorAgentClaude   = "claude"
+	ConductorAgentCodex    = "codex"
+	ConductorAgentHermes   = "hermes"
+	ConductorAgentOpencode = "opencode"
 
 	ConductorSessionTitlePrefix     = "conductor-"
 	ConductorHeartbeatMessagePrefix = "Heartbeat:"
@@ -61,6 +62,13 @@ var conductorAgentSpecs = map[string]ConductorAgentSpec{
 		DefaultCommand:         "hermes",
 		InstructionsFileName:   "HERMES.md",
 		SupportsClearOnCompact: true,
+	},
+	ConductorAgentOpencode: {
+		Agent:                  ConductorAgentOpencode,
+		DisplayName:            "opencode",
+		DefaultCommand:         "opencode",
+		InstructionsFileName:   "AGENTS.md",
+		SupportsClearOnCompact: false,
 	},
 }
 
@@ -408,7 +416,7 @@ func GetConductorAgentSpec(agent string) (ConductorAgentSpec, error) {
 	normalized := normalizeConductorAgent(agent)
 	spec, ok := conductorAgentSpecs[normalized]
 	if !ok {
-		return ConductorAgentSpec{}, fmt.Errorf("unsupported conductor agent %q (supported: %s, %s, %s)", agent, ConductorAgentClaude, ConductorAgentCodex, ConductorAgentHermes)
+		return ConductorAgentSpec{}, fmt.Errorf("unsupported conductor agent %q (supported: %s, %s, %s, %s)", agent, ConductorAgentClaude, ConductorAgentCodex, ConductorAgentHermes, ConductorAgentOpencode)
 	}
 	return spec, nil
 }
