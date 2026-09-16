@@ -900,6 +900,11 @@ func SetupConductorWithAgent(name, profile, agent string, heartbeatEnabled bool,
 		if otherAgent == spec.Agent {
 			continue
 		}
+		// Two agents can share an instructions filename (codex and opencode both
+		// use AGENTS.md); never delete the file we just wrote for the current spec.
+		if otherSpec.InstructionsFileName == spec.InstructionsFileName {
+			continue
+		}
 		stalePath := filepath.Join(dir, otherSpec.InstructionsFileName)
 		if err := os.Remove(stalePath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to remove stale %s: %w", otherSpec.InstructionsFileName, err)

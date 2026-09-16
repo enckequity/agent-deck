@@ -1075,6 +1075,7 @@ func knownModelIDsForTool(tool string) []string {
 			"anthropic/claude-opus-4-8",
 			"anthropic/claude-opus-4-7",
 			"anthropic/claude-haiku-4-5",
+			"stealth/union-alpha",
 		}
 	case session.IsCodexCompatible(tool):
 		return []string{
