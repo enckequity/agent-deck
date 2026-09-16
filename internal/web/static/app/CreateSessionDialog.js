@@ -94,6 +94,7 @@ const MODEL_ID_CATALOG = {
     { value: 'anthropic/claude-opus-4-8', label: 'Anthropic Claude Opus 4.8' },
     { value: 'anthropic/claude-opus-4-7', label: 'Anthropic Claude Opus 4.7' },
     { value: 'anthropic/claude-haiku-4-5', label: 'Anthropic Claude Haiku 4.5' },
+    { value: 'stealth/union-alpha', label: 'Stealth · Union Alpha (free)' },
   ],
 }
 
