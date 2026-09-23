@@ -66,6 +66,27 @@ final class ClaudeHistoryTests: XCTestCase {
         XCTAssertFalse(conversation.busy)
     }
 
+    func testTurnEndsOnApiErrorAndInterrupt() {
+        let apiError = [
+            #"{"type":"user","message":{"role":"user","content":"go"}}"#,
+            #"{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":[{"type":"text","text":"API Error: rate limited"}],"stop_reason":"stop_sequence"}}"#,
+        ]
+        XCTAssertFalse(ClaudeHistory.parse(Data(apiError.joined(separator: "\n").utf8)).busy)
+
+        let interrupted = [
+            #"{"type":"user","message":{"role":"user","content":"go"}}"#,
+            #"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"make"}}],"stop_reason":"tool_use"}}"#,
+            #"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"x"}]}}"#,
+            #"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}"#,
+        ]
+        XCTAssertFalse(ClaudeHistory.parse(Data(interrupted.joined(separator: "\n").utf8)).busy)
+    }
+
+    func testKeepsPromptsThatStartWithAngleBracket() {
+        let line = #"{"type":"user","message":{"role":"user","content":"<div> is misaligned, fix it"}}"#
+        XCTAssertEqual(ClaudeHistory.parse(Data(line.utf8)).entries, [.user("<div> is misaligned, fix it")])
+    }
+
     func testTranscriptPathEncoding() {
         XCTAssertEqual(
             ClaudeHistory.transcriptPath(directory: "/Users/me/.local/share/agent-deck/conductor/autopilot", claudeSessionID: "abc"),

@@ -208,7 +208,9 @@ final class Store: ObservableObject {
         }
 
         let claude = sessions.filter { $0.tool == "claude" }
-        let stale = claude.filter { claudeStatus[$0.id] != $0.status || claudeTranscripts[$0.id] == nil }
+        // Looked up once per status, so a session without a transcript yet costs no extra CLI calls;
+        // its path is still watched, so the file's first write loads it.
+        let stale = claude.filter { claudeStatus[$0.id] != $0.status }
         let located = await withTaskGroup(of: (RawSession, String?).self) { group in
             for session in stale {
                 group.addTask {
@@ -223,10 +225,11 @@ final class Store: ObservableObject {
         for (session, path) in located {
             let statusChanged = claudeStatus[session.id] != session.status
             claudeStatus[session.id] = session.status
-            if let path, FileManager.default.fileExists(atPath: path) {
+            if let path {
                 if claudeTranscripts[session.id] != path { transcriptStamps[session.id] = nil }
                 claudeTranscripts[session.id] = path
-            } else if statusChanged {
+            }
+            if statusChanged, !FileManager.default.fileExists(atPath: path ?? "") {
                 loadLastReply(session.id)
             }
         }
@@ -248,12 +251,13 @@ final class Store: ObservableObject {
     /// Reads one transcript off the main thread when its file changed since the last read.
     /// Overlapping requests for the same task collapse into one re-read after the current one.
     private func loadClaude(_ id: String) async {
-        guard let path = claudeTranscripts[id] else { return }
+        guard claudeTranscripts[id] != nil else { return }
         guard !claudeLoading.contains(id) else { claudeDirty.insert(id); return }
         claudeLoading.insert(id)
         defer { claudeLoading.remove(id) }
         repeat {
             claudeDirty.remove(id)
+            guard let path = claudeTranscripts[id] else { break }
             let stamp = FileStamp(path: path)
             guard stamp == nil || stamp != transcriptStamps[id] else { continue }
             if let conversation = await Task.detached(priority: .userInitiated, operation: { ClaudeHistory.load(path: path) }).value {
@@ -269,7 +273,7 @@ final class Store: ObservableObject {
             let result = await CLI.deck("session", "output", id, "--json")
             let content = (try? JSONDecoder().decode(RawOutput.self, from: result.stdout))?.content ?? ""
             let conversation = Conversation.lastReply(content)
-            if claudeTranscripts[id] == nil, conversations[id] != conversation {
+            if transcriptStamps[id] == nil, conversations[id] != conversation {
                 conversations[id] = conversation
                 recompute()
             }

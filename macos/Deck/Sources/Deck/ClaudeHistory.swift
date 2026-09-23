@@ -53,6 +53,7 @@ enum ClaudeHistory {
                     lastAssistantText = ""
                     continue
                 }
+                if text.hasPrefix("[Request interrupted") { conversation.busy = false; continue }
                 if message.content.hasToolResult { conversation.busy = true; continue }
                 guard entry.isMeta != true, entry.isCompactSummary != true,
                       let prompt = userPrompt(text) else { continue }
@@ -61,7 +62,8 @@ enum ClaudeHistory {
                 conversation.busy = true
                 lastAssistantText = ""
             case "assistant":
-                conversation.busy = message.stop_reason != "end_turn"
+                // nil while a reply streams; end_turn, stop_sequence (API errors) etc. end the turn.
+                conversation.busy = message.stop_reason == nil || message.stop_reason == "tool_use"
                 for block in message.content.blocks {
                     switch block.type {
                     case "text":
@@ -103,7 +105,8 @@ enum ClaudeHistory {
         // agent-deck wraps what it sends in <pasted_content id="…"> tags.
         prompt = prompt.replacingOccurrences(of: #"</?pasted_content[^>]*>"#, with: "", options: .regularExpression)
         prompt = OpenCodeHistory.stripLauncherContext(prompt).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, !prompt.hasPrefix("<"), !prompt.hasPrefix("[Request interrupted") else { return nil }
+        let noise = ["<command-", "<local-command", "<task-notification", "<system-reminder", "<bash-", "[Request interrupted"]
+        guard !prompt.isEmpty, !noise.contains(where: prompt.hasPrefix) else { return nil }
         return prompt
     }
 
