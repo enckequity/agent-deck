@@ -5,6 +5,8 @@
 #   deck-task -c claude "redesign the billing webhook"      # Claude Code (Opus)
 #   deck-task -r enck-os "add dark mode to settings"        # other repo (teamshift|enck-os|path)
 #   deck-task -p "draft the new onboarding copy"            # open a PR but don't merge
+#   deck-task -P conductor-company-twin "finish the twin"   # parent to another conductor
+#   deck-task -P "" "quick experiment"                      # no conductor (default: conductor-autopilot)
 #
 # Each task gets a fresh worktree off origin/main on its own branch (<tool>/<slug>),
 # shows up in Deck (~/Applications/Deck.app) and the agent-deck TUI, and runs end to end:
@@ -17,12 +19,19 @@ repo=teamshift
 merge=1
 min_free_gib=${DECK_MIN_FREE_GIB:-8}
 
-usage() { sed -n 2,12p "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
-while getopts "c:r:ph" opt; do
+usage() { sed -n 2,13p "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+# -P <conductor-session>: parent the task to a conductor so its completion reaches
+# the conductor as a transition event (event-driven supervision). Parent MUST be
+# set at launch — set-parent afterwards does NOT wire transition delivery.
+# Defaults to the autopilot conductor so it answers the task the moment it waits;
+# DECK_PARENT= or -P "" launches a top-level session instead.
+parent=${DECK_PARENT-conductor-autopilot}
+while getopts "c:r:pP:h" opt; do
   case $opt in
     c) tool=$OPTARG ;;
     r) repo=$OPTARG ;;
     p) merge=0 ;;
+    P) parent=$OPTARG ;;
     h) usage ;;
     *) usage 2 ;;
   esac
@@ -68,7 +77,16 @@ When you must wait on something, use one blocking watch command (for example gh 
 # both tools (agent-deck defaults it on for claude only) so the worker ends with
 # agent-deck's native status=<ok|fail> sentinel and its completion reaches the
 # ledger. Idle sessions stop after 30m to spare memory; resume any from the dashboard.
-args=(launch "$root" -c "$tool" -g "$group" -t "${slug:-task}" -w "$branch" -b --title-lock --no-parent --assert-done --idle-timeout=30m -m "$prompt")
+args=(launch "$root" -c "$tool" -g "$group" -t "${slug:-task}" -w "$branch" -b --title-lock --assert-done --idle-timeout=30m -m "$prompt")
+if [ -n "$parent" ] && ! agent-deck session show "$parent" >/dev/null 2>&1; then
+  echo "deck-task: conductor $parent not found; launching without a parent" >&2
+  parent=
+fi
+if [ -n "$parent" ]; then
+  args+=(--parent "$parent")   # event-driven: completion reaches the conductor
+else
+  args+=(--no-parent)          # intentional top-level session
+fi
 [ "$tool" = claude ] && args+=(--skip-permissions)
 agent-deck "${args[@]}"
 echo "deck-task: $branch → attach with: agent-deck (group $group)"
