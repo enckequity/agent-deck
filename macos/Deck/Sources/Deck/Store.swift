@@ -56,6 +56,11 @@ final class Store: ObservableObject {
 
     private var pendingSelectAfter: Date?
     private var claudeStatus: [String: String] = [:]
+    /// Deck session id → its Claude Code transcript, and the file stamp last read from it.
+    private var claudeTranscripts: [String: String] = [:]
+    private var transcriptStamps: [String: FileStamp] = [:]
+    private var claudeLoading: Set<String> = []
+    private var claudeDirty: Set<String> = []
     private var watcher: FileWatcher?
     private var refreshing = false
     private var refreshQueued = false
@@ -68,17 +73,23 @@ final class Store: ObservableObject {
     // MARK: polling
 
     /// Event-driven: agent-deck registry writes re-list sessions; opencode history writes only
-    /// re-read that history in-process. A slow timer remains for crashes, which leave no file trace.
+    /// re-read that history in-process, and a Claude transcript write re-reads just that task.
+    /// A slow timer remains for crashes, which leave no file trace.
     func start() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
         let share = "\(CLI.home)/.local/share"
-        watcher = FileWatcher(paths: ["\(share)/agent-deck/profiles", "\(share)/opencode"]) { [weak self] paths in
+        let watched = ["\(share)/agent-deck/profiles", "\(share)/opencode", ClaudeHistory.projectsPath]
+        watcher = FileWatcher(paths: watched) { [weak self] paths in
             let names = Set(paths.map { URL(fileURLWithPath: $0).lastPathComponent })
+            let transcripts = Set(paths.filter { $0.hasSuffix(".jsonl") })
             Task { @MainActor in
+                guard let self else { return }
+                let changed = self.claudeTranscripts.filter { transcripts.contains($0.value) }.map(\.key)
+                if !changed.isEmpty { self.reloadClaude(changed) }
                 if !names.isDisjoint(with: ["state.db", "state.db-wal"]) {
-                    self?.requestRefresh(full: true)
+                    self.requestRefresh(full: true)
                 } else if !names.isDisjoint(with: ["opencode.db", "opencode.db-wal"]) {
-                    self?.requestRefresh(full: false)
+                    self.requestRefresh(full: false)
                 }
             }
         }
@@ -185,7 +196,8 @@ final class Store: ObservableObject {
     }
 
     /// opencode history is read straight from its database on every poll (cheap, read-only).
-    /// Claude's last reply comes from the CLI, refetched when its status changes.
+    /// Claude history is read from its transcript file; `agent-deck session show` names that
+    /// file, refetched when the session's status changes (a restart can start a new transcript).
     private func loadConversations() async {
         let opencode = sessions.filter { $0.tool != "claude" }.map { ($0.id, $0.path) }
         let loaded = await Task.detached(priority: .userInitiated) {
@@ -194,16 +206,72 @@ final class Store: ObservableObject {
         for (id, conversation) in loaded where conversations[id] != conversation {
             conversations[id] = conversation
         }
-        for session in sessions where session.tool == "claude" && claudeStatus[session.id] != session.status {
-            claudeStatus[session.id] = session.status
-            Task {
-                let result = await CLI.deck("session", "output", session.id, "--json")
-                let content = (try? JSONDecoder().decode(RawOutput.self, from: result.stdout))?.content ?? ""
-                let conversation = Conversation.lastReply(content)
-                if conversations[session.id] != conversation {
-                    conversations[session.id] = conversation
-                    recompute()
+
+        let claude = sessions.filter { $0.tool == "claude" }
+        let stale = claude.filter { claudeStatus[$0.id] != $0.status || claudeTranscripts[$0.id] == nil }
+        let located = await withTaskGroup(of: (RawSession, String?).self) { group in
+            for session in stale {
+                group.addTask {
+                    let result = await CLI.deck("session", "show", session.id, "--json")
+                    guard let show = try? JSONDecoder().decode(RawShow.self, from: result.stdout),
+                          let claudeID = show.claude_session_id, !claudeID.isEmpty else { return (session, nil) }
+                    return (session, ClaudeHistory.transcriptPath(directory: show.path ?? session.path, claudeSessionID: claudeID))
                 }
+            }
+            return await group.reduce(into: []) { $0.append($1) }
+        }
+        for (session, path) in located {
+            let statusChanged = claudeStatus[session.id] != session.status
+            claudeStatus[session.id] = session.status
+            if let path, FileManager.default.fileExists(atPath: path) {
+                if claudeTranscripts[session.id] != path { transcriptStamps[session.id] = nil }
+                claudeTranscripts[session.id] = path
+            } else if statusChanged {
+                loadLastReply(session.id)
+            }
+        }
+        await withTaskGroup(of: Void.self) { group in
+            for id in claude.map(\.id) where claudeTranscripts[id] != nil {
+                group.addTask { await self.loadClaude(id) }
+            }
+        }
+    }
+
+    /// Re-reads just these tasks' transcripts after a file event, then updates the list.
+    private func reloadClaude(_ ids: [String]) {
+        Task {
+            for id in ids { await loadClaude(id) }
+            recompute()
+        }
+    }
+
+    /// Reads one transcript off the main thread when its file changed since the last read.
+    /// Overlapping requests for the same task collapse into one re-read after the current one.
+    private func loadClaude(_ id: String) async {
+        guard let path = claudeTranscripts[id] else { return }
+        guard !claudeLoading.contains(id) else { claudeDirty.insert(id); return }
+        claudeLoading.insert(id)
+        defer { claudeLoading.remove(id) }
+        repeat {
+            claudeDirty.remove(id)
+            let stamp = FileStamp(path: path)
+            guard stamp == nil || stamp != transcriptStamps[id] else { continue }
+            if let conversation = await Task.detached(priority: .userInitiated, operation: { ClaudeHistory.load(path: path) }).value {
+                transcriptStamps[id] = stamp
+                if conversations[id] != conversation { conversations[id] = conversation }
+            }
+        } while claudeDirty.contains(id)
+    }
+
+    /// Fallback when a Claude session has no transcript on disk: its last reply via the CLI.
+    private func loadLastReply(_ id: String) {
+        Task {
+            let result = await CLI.deck("session", "output", id, "--json")
+            let content = (try? JSONDecoder().decode(RawOutput.self, from: result.stdout))?.content ?? ""
+            let conversation = Conversation.lastReply(content)
+            if claudeTranscripts[id] == nil, conversations[id] != conversation {
+                conversations[id] = conversation
+                recompute()
             }
         }
     }
@@ -313,6 +381,25 @@ struct RawSession: Decodable {
     let status: String
     let created_at: String?
     let archived: Bool?
+}
+
+private struct RawShow: Decodable {
+    let claude_session_id: String?
+    let path: String?
+}
+
+/// Size and modification date, to skip re-reading a transcript that has not changed.
+private struct FileStamp: Equatable {
+    let size: UInt64
+    let modified: Date
+
+    init?(path: String) {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attributes[.size] as? UInt64, let modified = attributes[.modificationDate] as? Date
+        else { return nil }
+        self.size = size
+        self.modified = modified
+    }
 }
 
 private struct RawOutput: Decodable {

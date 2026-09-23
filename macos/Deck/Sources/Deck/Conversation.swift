@@ -32,7 +32,7 @@ struct Conversation: Equatable {
     }
 
     /// Removes the done marker and records the terminal marker of the final reply.
-    fileprivate mutating func absorbMarkers(_ text: String) -> String {
+    mutating func absorbMarkers(_ text: String) -> String {
         var kept: [String] = []
         marker = .none
         for line in text.components(separatedBy: "\n") {

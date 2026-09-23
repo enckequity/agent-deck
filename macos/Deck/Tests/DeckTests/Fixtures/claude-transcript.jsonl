@@ -1,0 +1,219 @@
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": "\n\n<pasted_content id=\"0000\">\nFix the example issue.\n\nContext: you are in a fresh git worktree on branch claude/example.\n</pasted_content id=\"0000\">"}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": "echo step 2", "description": "Step 2"}}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t3", "name": "Bash", "input": {"command": "echo step 3", "description": "Step 3"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01HkG5LS5xTpGSDJ55f2W9sP", "content": "redacted"}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01KS3HEvZJa9PttjP9AMQieG", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t6", "name": "Bash", "input": {"command": "echo step 6", "description": "Step 6"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01GWrXGJ92TUCPHt74GmiF1R", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t9", "name": "Bash", "input": {"command": "echo step 9", "description": "Step 9"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_012Lm1PWCcNxtrzsG46y6sDS", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 12."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t13", "name": "Bash", "input": {"command": "echo step 13", "description": "Step 13"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01MFxdNDYaaTu4gC176382Xo", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t15", "name": "Bash", "input": {"command": "echo step 15", "description": "Step 15"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01B9SW3N53pAyAiu8um8hm4D", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t17", "name": "Bash", "input": {"command": "echo step 17", "description": "Step 17"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01A1v83uqtuDSWPegbdb8q4U", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 20."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t21", "name": "Bash", "input": {"command": "echo step 21", "description": "Step 21"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01CqRUBxGDTxwKxA7V6vbkjP", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t23", "name": "Bash", "input": {"command": "echo step 23", "description": "Step 23"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01DghudzHFpoyQwchGRdUnqP", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 26."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t27", "name": "Bash", "input": {"command": "echo step 27", "description": "Step 27"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01G4QaEtuP7GXRF4XW826WA3", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t29", "name": "Bash", "input": {"command": "echo step 29", "description": "Step 29"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01SkZEYo9b6CyiCxDX9wVMeT", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 32."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t33", "name": "Bash", "input": {"command": "echo step 33", "description": "Step 33"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01B2RtsxW6kmyMuE5mfYFF6p", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t36", "name": "Bash", "input": {"command": "echo step 36", "description": "Step 36"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01CEwvuQRYYAPonWAwb6wGam", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t38", "name": "Bash", "input": {"command": "echo step 38", "description": "Step 38"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01JoGEGZgY9hKaJmYKdn5TVD", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 41."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t42", "name": "Bash", "input": {"command": "echo step 42", "description": "Step 42"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01R5YgXnF6yK6rtDnLvZzoZ5", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t44", "name": "Bash", "input": {"command": "echo step 44", "description": "Step 44"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_017xKqHu9pQLGPYAh32huGyc", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t47", "name": "Bash", "input": {"command": "echo step 47", "description": "Step 47"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_016Yw4AZ25sPt9ifzLHe47r3", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 50."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t51", "name": "Bash", "input": {"command": "echo step 51", "description": "Step 51"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_016gksLW4zvdrRqd8Q1X26Vi", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t54", "name": "Bash", "input": {"command": "echo step 54", "description": "Step 54"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_016pRTCxy58e2675zsb5SpZs", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t56", "name": "Bash", "input": {"command": "echo step 56", "description": "Step 56"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01784GdJZ1xS8mabd2paVfFu", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t58", "name": "Bash", "input": {"command": "echo step 58", "description": "Step 58"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_015Jujzj4pwJUXVFZ9wjGeFZ", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t61", "name": "Bash", "input": {"command": "echo step 61", "description": "Step 61"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01RTQGeZn7v3iAAw4ivAwnMR", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t64", "name": "Bash", "input": {"command": "echo step 64", "description": "Step 64"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01PzKHDq4kpuXGbwufzCEnCy", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 67."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t68", "name": "Bash", "input": {"command": "echo step 68", "description": "Step 68"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01Mn25FFsaTjQ3c2h5DqvBHf", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t71", "name": "Bash", "input": {"command": "echo step 71", "description": "Step 71"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01JmbcEJMHci618aqXtEFrVF", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t73", "name": "Bash", "input": {"command": "echo step 73", "description": "Step 73"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01B3oJzEoV9VTby99DwCAamn", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t75", "name": "Bash", "input": {"command": "echo step 75", "description": "Step 75"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01N2JjTfBb5Gf5Hao2i1ZaxC", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t78", "name": "Bash", "input": {"command": "echo step 78", "description": "Step 78"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01FsUKq6TAW8gBg9N6FFnkGH", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t80", "name": "Bash", "input": {"command": "echo step 80", "description": "Step 80"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01NtGbs3SuoLsAB7fzNmxTUx", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t84", "name": "Bash", "input": {"command": "echo step 84", "description": "Step 84"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01VzjLx4UaAxm91irB39YytD", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t87", "name": "Bash", "input": {"command": "echo step 87", "description": "Step 87"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01Kq88B97LdskuBz5myCcxDb", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 90."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t91", "name": "Bash", "input": {"command": "echo step 91", "description": "Step 91"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01KxUXsHPFosDZAMCvEEExob", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 94."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t95", "name": "Bash", "input": {"command": "echo step 95", "description": "Step 95"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_014Zj7TEUpFrC47tyvWzKcU1", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t97", "name": "Bash", "input": {"command": "echo step 97", "description": "Step 97"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01Ka38sXAMSFhUjZG7jDHuuE", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 100."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t101", "name": "Bash", "input": {"command": "echo step 101", "description": "Step 101"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01HbfFw9YLopJqrQAPAM7b61", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t103", "name": "Bash", "input": {"command": "echo step 103", "description": "Step 103"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01WkNg9onCazMwJ3cGwjmbbr", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 105."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t106", "name": "Bash", "input": {"command": "echo step 106", "description": "Step 106"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01Bs1J8rXi3ssUH4rhkmC1YZ", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t108", "name": "Agent", "input": {"description": "Review the diff", "prompt": "redacted"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01AananrwwUg9X9fyTiMxRKo", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 111."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t112", "name": "Bash", "input": {"command": "echo step 112", "description": "Step 112"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_016CWLPXArU3y4vrDTxjRYMR", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t114", "name": "Bash", "input": {"command": "echo step 114", "description": "Step 114"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01GNaTPEBbJtnL4cUpfvgT3T", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t116", "name": "Bash", "input": {"command": "echo step 116", "description": "Step 116"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01BYX3S5gSKJMzHYZH8Nnsxy", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 119."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t120", "name": "Bash", "input": {"command": "echo step 120", "description": "Step 120"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01L18Z1CaeqYYvC2EHQSNHWC", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 123."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t124", "name": "Bash", "input": {"command": "echo step 124", "description": "Step 124"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01EJg4Rajztq57bMcbis8ULy", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t127", "name": "Bash", "input": {"command": "echo step 127", "description": "Step 127"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_018umS5ha3JNK8CFZYENSq65", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t130", "name": "Bash", "input": {"command": "echo step 130", "description": "Step 130"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01MpLcwVzd39YxMNbZiW8pbR", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 132."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t133", "name": "Bash", "input": {"command": "echo step 133", "description": "Step 133"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01GiTHadnTu1vhYwPJGUBNQ7", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 136."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t137", "name": "Bash", "input": {"command": "echo step 137", "description": "Step 137"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01T8otKmg3PHpVTq5ZaPgc4Q", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t139", "name": "Bash", "input": {"command": "echo step 139", "description": "Step 139"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01MxXnsns2TD68tVtRX5Z88Q", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 142."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t143", "name": "Bash", "input": {"command": "echo step 143", "description": "Step 143"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01DZsgJs5HPAJ3m9g5YkbQxM", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 146."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t147", "name": "Bash", "input": {"command": "echo step 147", "description": "Step 147"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_018XcXqTVEp4YBkTcmXTqEsf", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t151", "name": "Bash", "input": {"command": "echo step 151", "description": "Step 151"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01Qj8AVpMuuE52F8oprXB7bZ", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 154."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t155", "name": "Bash", "input": {"command": "echo step 155", "description": "Step 155"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01YZe4sLRivzBeowkQnoq7yX", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t158", "name": "Bash", "input": {"command": "echo step 158", "description": "Step 158"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01C7Ajnp1bwwvqVr5GvVggTg", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 160."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t161", "name": "Bash", "input": {"command": "echo step 161", "description": "Step 161"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_018BC7nd8zhUjvnqMA8rZ4Xr", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t164", "name": "Bash", "input": {"command": "echo step 164", "description": "Step 164"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_012AabX7ogt8BQ8U3tArndHh", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 167."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t168", "name": "Bash", "input": {"command": "echo step 168", "description": "Step 168"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01TkpGXodrgXeSFssP9pihAN", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 170."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t171", "name": "Bash", "input": {"command": "echo step 171", "description": "Step 171"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01NDZR5aPmyaysyBbxEZLsyT", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t175", "name": "Edit", "input": {"file_path": "/repo/file175.py"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_015q59nvcT5waASZWp7hwLn9", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t177", "name": "Bash", "input": {"command": "echo step 177", "description": "Step 177"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01MfKAAxCbQySW1BTHtAB5Mk", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t180", "name": "Bash", "input": {"command": "echo step 180", "description": "Step 180"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01McvUbiUJxntmEBprS1CJ2v", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 182."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t183", "name": "Bash", "input": {"command": "echo step 183", "description": "Step 183"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01GxYZegDkHkkQ9f6BfWeHBH", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t185", "name": "Bash", "input": {"command": "echo step 185", "description": "Step 185"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01P6s27Gx2ipTeb3jdz3LRfP", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t187", "name": "Bash", "input": {"command": "echo step 187", "description": "Step 187"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01GzwU8TfWZ1KiNU9NfawNiR", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t189", "name": "Bash", "input": {"command": "echo step 189", "description": "Step 189"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01Deon3KyWUjipLazPo6P4xN", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 191."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t192", "name": "Bash", "input": {"command": "echo step 192", "description": "Step 192"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01LWoqWPgZFXUfSocVQW4Qtg", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 195."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t196", "name": "Bash", "input": {"command": "echo step 196", "description": "Step 196"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01Ui86JgQ9cQVScE5wpYP8TL", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t198", "name": "Bash", "input": {"command": "echo step 198", "description": "Step 198"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_018AVrdHTP1i7BW4sEigdPj1", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 200."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t201", "name": "Bash", "input": {"command": "echo step 201", "description": "Step 201"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01NS6cZ5RbLU98MCK7RVozd5", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t203", "name": "Bash", "input": {"command": "echo step 203", "description": "Step 203"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_019JsN6EGf1Rx5LaK5s7DnHn", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 205."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t206", "name": "Bash", "input": {"command": "echo step 206", "description": "Step 206"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01999ZkH7Z1qdY2feQyhuipc", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 209."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t210", "name": "Bash", "input": {"command": "echo step 210", "description": "Step 210"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01KUUSekrP4nm4y9sMd8XUz1", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "thinking", "thinking": "", "signature": ""}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "text", "text": "Progress note 213."}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t214", "name": "Bash", "input": {"command": "echo step 214", "description": "Step 214"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_018jfYdSwQp1uJ8nrCkrnDcS", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "tool_use", "content": [{"type": "tool_use", "id": "t216", "name": "Bash", "input": {"command": "echo step 216", "description": "Step 216"}}]}}
+{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01HEo4HrVwM6RtNy3u4F9uSX", "content": "redacted"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "stop_reason": "end_turn", "content": [{"type": "text", "text": "Fixed and merged: https://github.com/example/repo/pull/1\n===AGENTDECK_DONE=== status=ok summary=fixed"}]}}
