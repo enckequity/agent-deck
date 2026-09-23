@@ -115,8 +115,11 @@ Already native before this work: session start (`session start`), replies
   exposes a session's *last* response (`session output`), and for opencode that is
   a raw terminal snapshot with TUI box-drawing artifacts, not structured history.
   Reading opencode's own store is the only way to render the conversation.
-- **FSEvents refresh** (`FileWatcher.swift`): serverless and covers opencode.db;
-  see (c).
+- **Claude conversation reader** (`ClaudeHistory.swift`, JSONL): the same gap for
+  Claude tasks. `session show --json` names the transcript (`claude_session_id` +
+  `path`), and Deck reads `~/.claude/projects/<encoded path>/<id>.jsonl` read-only.
+- **FSEvents refresh** (`FileWatcher.swift`): serverless and covers opencode.db and
+  `~/.claude/projects` (a transcript write re-reads only that task); see (c).
 - **macOS notifications** (`UNUserNotificationCenter`): already the native API;
   see (d).
 - **auto-continue hooks** (`agents-sync`, outside this repo): see (a).
