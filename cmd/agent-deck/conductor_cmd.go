@@ -16,6 +16,7 @@ import (
 	"al.essio.dev/pkg/shellescape"
 
 	"github.com/asheshgoplani/agent-deck/internal/session"
+	"github.com/asheshgoplani/agent-deck/internal/statedb"
 )
 
 // envVarFlags implements flag.Value for repeatable -env KEY=VALUE flags
@@ -54,6 +55,8 @@ func handleConductor(profile string, args []string) {
 		handleConductorMove(profile, args[1:])
 	case "migrate-dir":
 		handleConductorMigrateDir(profile, args[1:])
+	case "heartbeat-tick":
+		handleConductorHeartbeatTick(profile, args[1:])
 	case "help", "--help", "-h":
 		printConductorHelp()
 	default:
@@ -124,11 +127,44 @@ func parseConductorSetupArgs(fs *flag.FlagSet, args []string) (string, []string,
 
 func yesAnswer(s string) bool { return s == "y" || s == "yes" }
 
+// resolveConductorSetupAgent picks the agent `conductor setup` runs with. An
+// explicit --agent always wins: that is how a conductor switches runtimes.
+// Without one, an existing conductor keeps the agent stored in its meta.json,
+// so a bare re-run (the documented way to add channels later) does not reset
+// it to the claude default and then clean up its instructions file as a stale
+// sibling (#2434). A brand-new conductor gets the flag default. When the stored
+// meta cannot be trusted (unreadable, or an agent this build does not know) a
+// bare re-run refuses rather than guessing, since a wrong guess is the same
+// clobber.
+func resolveConductorSetupAgent(fs *flag.FlagSet, name string) (string, error) {
+	requested := fs.Lookup("agent").Value.String()
+	explicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "agent" {
+			explicit = true
+		}
+	})
+	if explicit {
+		return requested, nil
+	}
+	existing, err := session.LoadConductorMeta(name)
+	if errors.Is(err, os.ErrNotExist) {
+		return requested, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("cannot read the existing agent of conductor %q (%v); pass --agent explicitly", name, err)
+	}
+	if existing.Warning != "" {
+		return "", fmt.Errorf("conductor %q uses agent %q, which this build does not recognize; pass --agent explicitly", name, existing.Agent)
+	}
+	return existing.GetAgent(), nil
+}
+
 // handleConductorSetup sets up a named conductor with directories, sessions, and optionally the Telegram bridge
 func handleConductorSetup(profile string, args []string) {
 	fs := flag.NewFlagSet("conductor setup", flag.ExitOnError)
-	agent := fs.String("agent", session.ConductorAgentClaude, "Conductor agent runtime (claude, codex, hermes or opencode)")
-	noClearOnCompact := fs.Bool("no-clear-on-compact", false, "Claude-only: allow normal compaction instead of /clear when context fills up")
+	fs.String("agent", session.ConductorAgentClaude, "Conductor agent runtime (claude, codex, hermes, opencode, or pi); a re-run without it keeps the conductor's current agent")
+	noClearOnCompact := fs.Bool("no-clear-on-compact", false, "Claude-only: allow normal compaction instead of /clear when context fills up (the /clear only arms on an established context window: AGENTDECK_CONTEXT_WINDOW or a harness-reported size)")
 	description := fs.String("description", "", "Description for this conductor")
 	heartbeat := fs.Bool("heartbeat", false, "Enable heartbeat for this conductor (default)")
 	noHeartbeat := fs.Bool("no-heartbeat", false, "Disable heartbeat for this conductor")
@@ -156,7 +192,8 @@ func handleConductorSetup(profile string, args []string) {
 		fmt.Println()
 		fmt.Println("Options:")
 		fmt.Println("  -agent string")
-		fmt.Println("        Conductor agent runtime: claude or codex (default \"claude\")")
+		fmt.Println("        Conductor agent runtime: claude, codex, hermes, opencode, or pi (default \"claude\")")
+		fmt.Println("        A re-run without -agent keeps the conductor's current agent")
 		fmt.Println("  -description string")
 		fmt.Println("        Description for this conductor")
 		fmt.Println("  -heartbeat")
@@ -167,6 +204,8 @@ func handleConductorSetup(profile string, args []string) {
 		fmt.Println("        Minutes of idle time before pausing heartbeats (default 0=disabled, negative also disabled)")
 		fmt.Println("  -no-clear-on-compact")
 		fmt.Println("        Claude-only: allow normal compaction instead of /clear when context fills up")
+		fmt.Println("        The /clear only arms on an established context window (AGENTDECK_CONTEXT_WINDOW")
+		fmt.Println("        or a harness-reported size); a window inferred from the model id leaves it off.")
 		fmt.Println()
 		fmt.Println("Conductor-specific files:")
 		fmt.Println("  -instructions-md string")
@@ -216,7 +255,12 @@ func handleConductorSetup(profile string, args []string) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	spec, err := session.GetConductorAgentSpec(*agent)
+	resolvedAgent, err := resolveConductorSetupAgent(fs, name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	spec, err := session.GetConductorAgentSpec(resolvedAgent)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -597,6 +641,14 @@ func handleConductorSetup(profile string, args []string) {
 		fmt.Fprintf(os.Stderr, "Error saving session for %s: %v\n", resolvedProfile, err)
 		os.Exit(1)
 	}
+	// Recall phase 1: a conductor session carries its purpose as a durable
+	// hint from the start (docs/recall.md), so the hint corpus does not
+	// depend on anyone typing --hint on the high-volume creation path.
+	if db := storage.GetDB(); db != nil && !existed {
+		if err := db.SetSessionHint(statedb.HintScopeInstance, sessionID, hintKeyPurpose, "conductor "+name, statedb.HintSourceConductor, ""); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: recall hint: %v\n", err)
+		}
+	}
 
 	// Step 6: Install heartbeat timer (if heartbeat enabled and interval > 0)
 	if heartbeatEnabled {
@@ -854,7 +906,10 @@ func handleConductorTeardown(_ string, args []string) {
 		}
 
 		// Remove heartbeat timer
-		_ = session.UninstallHeartbeatDaemon(meta.Name)
+		if err := session.UninstallHeartbeatDaemon(meta.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "Error disabling heartbeat for %s: %v\n", meta.Name, err)
+			os.Exit(1)
+		}
 
 		// Optionally remove directory and session
 		if *removeAll {
@@ -1472,6 +1527,7 @@ func printConductorHelp() {
 	fmt.Println("  list             List all configured conductors")
 	fmt.Println("  move <name>      Move a conductor to another profile (--to-profile)")
 	fmt.Println("  migrate-dir <path>  Relocate the conductor base dir (move homes + reconcile daemons)")
+	fmt.Println("  heartbeat-tick <name>  Print the delta-only heartbeat message (empty when nothing changed)")
 	fmt.Println("  help             Show this help")
 	fmt.Println()
 	fmt.Println("Examples:")

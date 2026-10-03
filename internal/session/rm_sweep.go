@@ -58,6 +58,7 @@ func SweepInboxesForChildSession(childSessionID string) (int, error) {
 	// can't inherit stale state and per-parent ledgers don't leak. Best-effort —
 	// these never fail the rm.
 	_ = os.Remove(DeadLetterPathFor(childSessionID)) // dead-lettered records
+	RemoveTurnJournal(childSessionID)                // issue #2469 per-child turn journal
 	ForgetConsumedTurnsForChild(childSessionID)      // consumed-turn ledgers (this id as a CHILD)
 	ResetStopBlockBudget(childSessionID)             // Stop-hook block budget (if it was a parent)
 	sweepParentSideArtifacts(childSessionID)         // audit B5: this id's OWN parent-side files
@@ -80,29 +81,38 @@ func sweepParentSideArtifacts(parentID string) {
 
 	consumedTurnsMu.Lock()
 	_ = os.Remove(consumedTurnsPathFor(parentID))
+	// Issue #2469 per-parent artifacts: counters, digest marker, fleet fingerprint.
+	_ = ResetInboxStats(parentID)
+	_ = os.Remove(inboxDigestPath(parentID))
+	_ = os.Remove(fleetBlockPath(parentID))
 	consumedTurnsMu.Unlock()
 }
 
 // sweepInboxFilesForChild rewrites every inbox file dropping the child's lines,
-// holding inboxWriteMu for the duration. Split out so the broader outbox-artifact
-// cleanup in SweepInboxesForChildSession runs without the inbox lock held.
+// taking each file's flock and inboxWriteMu in turn. Split out so the broader
+// outbox-artifact cleanup in SweepInboxesForChildSession runs without the
+// inbox lock held.
 func sweepInboxFilesForChild(dir string, entries []os.DirEntry, childSessionID string) (int, error) {
-	inboxWriteMu.Lock()
-	defer inboxWriteMu.Unlock()
-
 	totalDropped := 0
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
 			continue
 		}
-		path := filepath.Join(dir, e.Name())
-		dropped, err := sweepOneInboxLocked(path, childSessionID)
+		dropped, err := sweepOneInboxFileForChild(filepath.Join(dir, e.Name()), childSessionID)
 		if err != nil {
 			return totalDropped, err
 		}
 		totalDropped += dropped
 	}
 	return totalDropped, nil
+}
+
+// sweepOneInboxFileForChild rewrites one inbox file under its flock (messaging
+// audit P1-3: every inbox rewrite takes the producers' lock).
+func sweepOneInboxFileForChild(path, childSessionID string) (int, error) {
+	return withInboxFileLocked(path, func() (int, error) {
+		return sweepOneInboxLocked(path, childSessionID)
+	})
 }
 
 // sweepOneInboxLocked rewrites one inbox file without lines whose

@@ -24,7 +24,7 @@ func TestIssue1225_WakeNudgeSendHasTimeout(t *testing.T) {
 		return nil
 	}
 
-	if err := sendWakeNudgeNoWait("", "parent-x"); err != nil {
+	if err := sendWakeNudgeNoWait("", "parent-x", wakeNudgeMessage); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 	if !hadDeadline {
@@ -33,6 +33,16 @@ func TestIssue1225_WakeNudgeSendHasTimeout(t *testing.T) {
 	remaining := time.Until(deadline)
 	if remaining <= 0 || remaining > wakeNudgeSendTimeout+time.Second {
 		t.Fatalf("deadline = %v from now, want within (0, %v]", remaining, wakeNudgeSendTimeout)
+	}
+	// Review round 2 (P3): the nudge may queue behind another sender for the
+	// full per-target lock wait; the deadline must outlive that wait plus the
+	// send itself, or the subprocess is killed while still waiting on the
+	// lock and the wake is silently lost.
+	if remaining <= SendTargetLockWait {
+		t.Fatalf("deadline = %v from now, must exceed the send lock wait %v", remaining, SendTargetLockWait)
+	}
+	if wakeNudgeSendTimeout < SendTargetLockWait+wakeNudgeDeliveryBudget {
+		t.Fatalf("wakeNudgeSendTimeout = %v, want >= lock wait %v + delivery budget %v", wakeNudgeSendTimeout, SendTargetLockWait, wakeNudgeDeliveryBudget)
 	}
 }
 
@@ -49,7 +59,7 @@ func TestIssue1225_WakeNudgeSendCommandShape(t *testing.T) {
 		return nil
 	}
 
-	if err := sendWakeNudgeNoWait("myprofile", "parent-y"); err != nil {
+	if err := sendWakeNudgeNoWait("myprofile", "parent-y", wakeNudgeMessage); err != nil {
 		t.Fatalf("send: %v", err)
 	}
 	want := []string{"-p", "myprofile", "session", "send", "parent-y", wakeNudgeMessage, "--no-wait", "-q"}

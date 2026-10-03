@@ -14,7 +14,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { menuModelSignal } from './dataModel.js'
-import { selectedIdSignal } from './state.js'
+import { selectedIdSignal, selectedGroupSignal } from './state.js'
 import { rightRailPanelsSignal } from './uiState.js'
 
 // Module-scope signal so collapsed state survives RightRail re-mounts
@@ -120,8 +120,25 @@ function ChildrenTree({ rootId, sessions }) {
 export function RightRail() {
   const { sessions } = menuModelSignal.value
   const selected = selectedIdSignal.value
-  const session = sessions.find(s => s.id === selected) || sessions[0]
+  const selectedGroup = selectedGroupSignal.value
   const panels = rightRailPanelsSignal.value
+
+  // The rail is session-scoped; a selected group has no session to describe.
+  // Say so instead of falling back to sessions[0].
+  if (selectedGroup) {
+    return html`
+      <div class="rightrail" data-testid="right-rail">
+        <div class="rail-head"><span class="t">SESSION</span></div>
+        <div class="rail-body">
+          <div style="padding: 18px; font-family: var(--mono); font-size: 11px; color: var(--muted);">
+            group selected — pick a session to see its details
+          </div>
+        </div>
+      </div>
+    `
+  }
+
+  const session = sessions.find(s => s.id === selected) || sessions[0]
 
   if (!session) {
     return html`
@@ -165,6 +182,12 @@ export function RightRail() {
               <div class="kv"><span class="k">path</span><span class="v" title=${session.path}>${session.path}</span></div>`}
             ${session.sandbox && html`<div class="kv"><span class="k">sandbox</span><span class="v warn">docker</span></div>`}
             ${session.worktree && html`<div class="kv"><span class="k">worktree</span><span class="v ok">yes</span></div>`}
+            ${Object.keys(session.hints || {}).sort().map(k => html`
+              <div class="kv hint" key=${'hint:' + k} data-testid=${`rail-hint-${k}`}>
+                <span class="k">${k}</span><span class="v" title=${session.hints[k]}>${session.hints[k]}</span>
+              </div>`)}
+            ${(session.tags || []).length > 0 && html`
+              <div class="kv hint" data-testid="rail-hint-tags"><span class="k">tags</span><span class="v">${session.tags.join(', ')}</span></div>`}
           </${Card}>
         `}
         ${panels.usage && html`

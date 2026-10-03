@@ -233,7 +233,7 @@ func TestRebootstrapLaunchAgents_SelectsOnlyOurBinary(t *testing.T) {
 	res, err := RebootstrapLaunchAgents(RebootstrapOptions{
 		GOOS: "darwin", ExePath: exe, LaunchAgentsDir: agents, UID: 501,
 		Runner: r, Sleep: func(d time.Duration) { slept = append(slept, d) },
-		Out: &out, Logger: discardLogger(),
+		Out: &out, Logger: discardLogger(), PendingPath: pendingPath(t),
 	})
 	require.NoError(t, err)
 
@@ -243,6 +243,7 @@ func TestRebootstrapLaunchAgents_SelectsOnlyOurBinary(t *testing.T) {
 	assert.NotContains(t, res.Skipped, "com.example.other", "foreign labels are ignored entirely")
 
 	assert.Equal(t, []string{
+		"launchctl print-disabled gui/501",
 		"launchctl bootout gui/501/com.agentdeck.transition-notifier",
 		"launchctl bootstrap gui/501 " + filepath.Join(agents, "com.agentdeck.transition-notifier.plist"),
 		"launchctl print gui/501/com.agentdeck.transition-notifier",
@@ -274,11 +275,11 @@ func TestRebootstrapLaunchAgents_MatchesThroughSymlink(t *testing.T) {
 	r.on("launchctl print gui/7/com.agentdeck.web", fakeReply{out: runningOutput("com.agentdeck.web")})
 	res, err := RebootstrapLaunchAgents(RebootstrapOptions{
 		GOOS: "darwin", ExePath: real, LaunchAgentsDir: agents, UID: 7,
-		Runner: r, Sleep: func(time.Duration) {}, Out: io.Discard, Logger: discardLogger(),
+		Runner: r, Sleep: func(time.Duration) {}, Out: io.Discard, Logger: discardLogger(), PendingPath: pendingPath(t),
 	})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"com.agentdeck.web"}, res.Restarted)
-	assert.Equal(t, "launchctl bootout gui/7/com.agentdeck.web", r.joined()[0])
+	assert.Equal(t, []string{"launchctl print-disabled gui/7", "launchctl bootout gui/7/com.agentdeck.web"}, r.joined()[:2])
 }
 
 func TestRebootstrapLaunchAgents_FailsWhenAgentNeverRuns(t *testing.T) {
@@ -299,7 +300,7 @@ func TestRebootstrapLaunchAgents_FailsWhenAgentNeverRuns(t *testing.T) {
 	_, err := RebootstrapLaunchAgents(RebootstrapOptions{
 		GOOS: "darwin", ExePath: exe, LaunchAgentsDir: agents, UID: 501,
 		Runner: r, Sleep: func(d time.Duration) { polls++; clock = clock.Add(d) },
-		Out: &out, Logger: discardLogger(),
+		Out: &out, Logger: discardLogger(), PendingPath: pendingPath(t),
 		now: func() time.Time { return clock },
 	})
 	require.Error(t, err)
@@ -308,8 +309,8 @@ func TestRebootstrapLaunchAgents_FailsWhenAgentNeverRuns(t *testing.T) {
 	assert.Contains(t, err.Error(), "state = waiting")
 	assert.Contains(t, err.Error(), "run: launchctl bootout gui/501/com.agentdeck.transition-notifier; launchctl bootstrap gui/501 "+plist)
 	assert.Contains(t, out.String(), "✗ com.agentdeck.transition-notifier")
-	assert.Equal(t, 20, polls, "10s budget in 500ms steps")
-	assert.Len(t, r.calls, 3+20, "bootout, bootstrap, first print, then one print per poll")
+	assert.Equal(t, 40, polls, "10s budget in 500ms steps, twice: the second round re-bootstraps from the plist")
+	assert.Len(t, r.calls, 1+2*(3+20), "the disabled list once, then per round: bootout, bootstrap, first print, then one print per poll")
 }
 
 func TestRebootstrapLaunchAgents_BootstrapRetriesThenFails(t *testing.T) {
@@ -326,7 +327,7 @@ func TestRebootstrapLaunchAgents_BootstrapRetriesThenFails(t *testing.T) {
 
 	_, err := RebootstrapLaunchAgents(RebootstrapOptions{
 		GOOS: "darwin", ExePath: exe, LaunchAgentsDir: agents, UID: 501,
-		Runner: r, Sleep: func(time.Duration) {}, Out: io.Discard, Logger: discardLogger(),
+		Runner: r, Sleep: func(time.Duration) {}, Out: io.Discard, Logger: discardLogger(), PendingPath: pendingPath(t),
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Input/output error")
@@ -336,7 +337,7 @@ func TestRebootstrapLaunchAgents_BootstrapRetriesThenFails(t *testing.T) {
 			bootstraps++
 		}
 	}
-	assert.Equal(t, 5, bootstraps)
+	assert.Equal(t, bootstrapAttempts, bootstraps, "a bootstrap launchd never accepts is a hard failure: no second round")
 }
 
 func TestRebootstrapLaunchAgents_BootoutHardFailureStops(t *testing.T) {
@@ -351,11 +352,11 @@ func TestRebootstrapLaunchAgents_BootoutHardFailureStops(t *testing.T) {
 	r.on("launchctl bootout gui/501/com.agentdeck.web", fakeReply{out: "Boot-out failed: 1: Operation not permitted", err: exitErr(1)})
 	_, err := RebootstrapLaunchAgents(RebootstrapOptions{
 		GOOS: "darwin", ExePath: exe, LaunchAgentsDir: agents, UID: 501,
-		Runner: r, Sleep: func(time.Duration) {}, Out: io.Discard, Logger: discardLogger(),
+		Runner: r, Sleep: func(time.Duration) {}, Out: io.Discard, Logger: discardLogger(), PendingPath: pendingPath(t),
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Operation not permitted")
-	assert.Len(t, r.calls, 1, "no bootstrap after a hard bootout failure")
+	assert.Equal(t, []string{"launchctl print-disabled gui/501", "launchctl bootout gui/501/com.agentdeck.web"}, r.joined(), "no bootstrap after a hard bootout failure")
 }
 
 func TestRebootstrapLaunchAgents_NoopOffDarwin(t *testing.T) {
@@ -393,4 +394,12 @@ func TestLaunchctlNotLoaded(t *testing.T) {
 	assert.True(t, launchctlNotLoaded("Boot-out failed: 3: No such process", exitErr(3)))
 	assert.True(t, launchctlNotLoaded("Could not find service \"x\" in domain for user gui: 501", exitErr(113)))
 	assert.False(t, launchctlNotLoaded("Boot-out failed: 1: Operation not permitted", exitErr(1)))
+}
+
+// pendingPath is the pending marker for one test: always the test's own
+// temp dir, never the cache dir RebootstrapOptions.fill would default to
+// (see TestLaunchdDefaults_NeverResolveUnderRealHome).
+func pendingPath(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), PendingRebootstrapFileName)
 }

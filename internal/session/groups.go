@@ -41,28 +41,34 @@ const (
 
 // Item represents a single item in the flattened group tree view
 type Item struct {
-	Type                ItemType
-	Group               *Group
-	Session             *Instance
-	RemoteSession       *RemoteSessionInfo // Set for ItemTypeRemoteSession/ItemTypeRemoteGroup
-	RemoteName          string             // Remote name for remote items
-	Level               int                // Indentation level (0 for root groups, 1 for sessions)
-	Path                string             // Group path for this item
-	IsLastInGroup       bool               // True if this is the last session in its group (for tree rendering)
-	RootGroupNum        int                // Pre-computed root group number for hotkey display (1-9, 0 if not a root group)
-	IsSubSession        bool               // True if this session has a parent session
-	IsLastSubSession    bool               // True if this is the last sub-session of its parent (for tree rendering)
-	ParentIsLastInGroup bool               // True if parent session is last top-level item (for tree line rendering)
-	IsWindow            bool               // True for ItemTypeWindow items
-	IsLastWindow        bool               // True if last window of parent session
-	WindowIndex         int                // Tmux window index (for ItemTypeWindow)
-	WindowName          string             // Tmux window name (for ItemTypeWindow)
-	WindowSessionID     string             // Parent session ID (for ItemTypeWindow)
-	WindowTool          string             // Detected tool in this window (claude, gemini, etc.)
-	CreatingID          string             // Non-empty for placeholder items (worktree creation in progress)
-	CreatingTitle       string             // Display title for creating placeholder
-	CreatingTool        string             // Tool for creating placeholder
-	DividerLabel        string             // Label shown on an ItemTypeDivider row (e.g. "idle / done")
+	Type          ItemType
+	Group         *Group
+	Session       *Instance
+	RemoteSession *RemoteSessionInfo // Set for ItemTypeRemoteSession/ItemTypeRemoteGroup
+	RemoteName    string             // Remote name for remote items
+	Level         int                // Indentation level (0 for root groups, 1 for sessions)
+	Path          string             // Group path for this item
+	// IsLastInGroup, IsLastSubSession and ParentIsLastInGroup are set here for
+	// cursor navigation but are TEMPORARY for the TUI: rebuildFlatItems calls
+	// RecomputeTreeConnectors on the final visible list (after archived/status
+	// filtering and view-mode partitioning), which recomputes all three from
+	// scratch. Do not trust these three fields' values here for tree rendering.
+	IsLastInGroup       bool   // True if this is the last session in its group (for tree rendering)
+	RootGroupNum        int    // Pre-computed root group number for hotkey display (1-9, 0 if not a root group)
+	IsSubSession        bool   // True if this session has a parent session
+	IsLastSubSession    bool   // True if this is the last sub-session of its parent (for tree rendering)
+	ParentIsLastInGroup bool   // True if parent session is last top-level item (for tree line rendering)
+	IsWindow            bool   // True for ItemTypeWindow items
+	IsLastWindow        bool   // True if last window of parent session
+	WindowIndex         int    // Tmux window index (for ItemTypeWindow)
+	WindowID            string // Stable tmux window id, e.g. "@12" (for ItemTypeWindow)
+	WindowName          string // Tmux window name (for ItemTypeWindow)
+	WindowSessionID     string // Parent session ID (for ItemTypeWindow)
+	WindowTool          string // Detected tool in this window (claude, gemini, etc.)
+	CreatingID          string // Non-empty for placeholder items (worktree creation in progress)
+	CreatingTitle       string // Display title for creating placeholder
+	CreatingTool        string // Tool for creating placeholder
+	DividerLabel        string // Label shown on an ItemTypeDivider row (e.g. "idle / done")
 }
 
 // IsCreatingPlaceholder reports whether this row is a still-creating session
@@ -150,8 +156,9 @@ func actionablePriority(s Status) int {
 //	-1 maestro      the fleet supervisor — a fixed point of reference that
 //	                surfaces above everything, including pin-top
 //	0  pin-top      fixed at the top, exempt from status/recency
-//	1  normal       the within-group sort (creation Order, or actionable
-//	                status → recency → Order — see group_sort config)
+//	1  normal       the within-group sort (creation Order, actionable
+//	                status → recency → Order, or alphabetical title → Order
+//	                — see group_sort config)
 //	2  pin-bottom   fixed at the bottom, exempt from status/recency
 func pinZone(inst *Instance) int {
 	if inst.IsMaestro() {
@@ -171,8 +178,8 @@ func pinZone(inst *Instance) int {
 // pin-bottom bands (pinZone), preserving the relative order of sessions within
 // each band. Unlike SortInstancesByActionable it never reorders by
 // status/recency, so it is safe to run on every render (Flatten): it moves only
-// pinned rows, leaving the load-time order (creation or actionable, per the
-// group_sort config) — and any live K/J manual order — of the normal band
+// pinned rows, leaving the load-time order (creation, actionable or
+// alphabetical, per the group_sort config) — and any live K/J manual order — of the normal band
 // untouched. This is what makes a pin edit take effect live instead of only
 // after a restart.
 func stablePinPartition(insts []*Instance) {
@@ -188,8 +195,8 @@ func stablePinPartition(insts []*Instance) {
 		if zi != 1 {
 			return insts[i].Order < insts[j].Order
 		}
-		// Normal (1) band is already sorted at load (creation Order, or actionable
-		// per group_sort); return false so SliceStable leaves its relative order
+		// Normal (1) band is already sorted at load (creation Order, actionable
+		// or alphabetical per group_sort); return false so SliceStable leaves its relative order
 		// untouched.
 		return false
 	})
@@ -204,6 +211,8 @@ func stablePinPartition(insts []*Instance) {
 //     K/J manual order unchanged.
 //   - "actionable" (issue #857): status→recency tiers apply before Order so
 //     the most recently actionable sessions surface first.
+//   - "alphabetical" (issue #2451): title A→Z, case-insensitive, before Order,
+//     so sessions with equal titles (ignoring case) keep their creation order.
 //
 // Pin-top and pin-bottom bands are always ordered by Order alone (fully fixed
 // — status and recency are ignored, so K/J reordering still works inside a
@@ -219,6 +228,14 @@ func stablePinPartition(insts []*Instance) {
 //     TestSessionOrderMigration)
 func SortInstancesByActionable(insts []*Instance) {
 	mode := currentGroupSortMode()
+	// Fold each title once rather than on every comparison.
+	var foldedTitle map[*Instance]string
+	if mode == "alphabetical" {
+		foldedTitle = make(map[*Instance]string, len(insts))
+		for _, inst := range insts {
+			foldedTitle[inst] = strings.ToLower(inst.Title)
+		}
+	}
 	sort.SliceStable(insts, func(i, j int) bool {
 		// The outermost key is the band: maestro (the fleet supervisor, a fixed
 		// point of reference that surfaces first regardless of status), then
@@ -233,9 +250,16 @@ func SortInstancesByActionable(insts []*Instance) {
 			return insts[i].Order < insts[j].Order
 		}
 		// Normal band. In actionable mode (issue #857) the status→recency tiers
-		// apply before Order; in creation mode (default) Order alone decides, so
+		// apply before Order; in alphabetical mode (issue #2451) the folded
+		// title does; in creation mode (default) Order alone decides, so
 		// sessions keep their creation order (or K/J manual order).
-		if mode == "actionable" {
+		switch mode {
+		case "alphabetical":
+			ti, tj := foldedTitle[insts[i]], foldedTitle[insts[j]]
+			if ti != tj {
+				return ti < tj
+			}
+		case "actionable":
 			pi, pj := actionablePriority(insts[i].Status), actionablePriority(insts[j].Status)
 			if pi != pj {
 				return pi < pj
@@ -249,17 +273,17 @@ func SortInstancesByActionable(insts []*Instance) {
 	})
 }
 
-// groupSortMode caches the active within-group sort mode ("creation" or
-// "actionable"). It is refreshed from LoadUserConfig on every config (re)load,
+// groupSortMode caches the active within-group sort mode ("creation",
+// "actionable" or "alphabetical"). It is refreshed from LoadUserConfig on every config (re)load,
 // so SortInstancesByActionable can read it without a disk hit and without
 // threading a parameter through the tree constructors. Defaults to "creation"
 // until SetGroupSortMode is first called.
 var groupSortMode atomic.Value // holds string
 
 // SetGroupSortMode updates the cached within-group sort mode. Any value other
-// than "actionable" normalizes to "creation".
+// than "actionable" or "alphabetical" normalizes to "creation".
 func SetGroupSortMode(mode string) {
-	if mode != "actionable" {
+	if mode != "actionable" && mode != "alphabetical" {
 		mode = "creation"
 	}
 	groupSortMode.Store(mode)
@@ -822,38 +846,68 @@ func (t *GroupTree) CollapseGroup(path string) {
 
 // MoveGroupUp moves a group up in the order (only within siblings at same level)
 func (t *GroupTree) MoveGroupUp(path string) {
-	parentPath := getParentPath(path)
-
-	for i, g := range t.GroupList {
-		if g.Path == path && i > 0 {
-			// Only swap if previous item is a sibling (same parent)
-			prevParent := getParentPath(t.GroupList[i-1].Path)
-			if prevParent == parentPath {
-				t.GroupList[i], t.GroupList[i-1] = t.GroupList[i-1], t.GroupList[i]
-				t.GroupList[i].Order = i
-				t.GroupList[i-1].Order = i - 1
-			}
-			break
-		}
-	}
+	t.moveGroupAmongSiblings(path, -1)
 }
 
 // MoveGroupDown moves a group down in the order (only within siblings at same level)
 func (t *GroupTree) MoveGroupDown(path string) {
-	parentPath := getParentPath(path)
+	t.moveGroupAmongSiblings(path, 1)
+}
 
-	for i, g := range t.GroupList {
-		if g.Path == path && i < len(t.GroupList)-1 {
-			// Only swap if next item is a sibling (same parent)
-			nextParent := getParentPath(t.GroupList[i+1].Path)
-			if nextParent == parentPath {
-				t.GroupList[i], t.GroupList[i+1] = t.GroupList[i+1], t.GroupList[i]
-				t.GroupList[i].Order = i
-				t.GroupList[i+1].Order = i + 1
-			}
-			break
+// moveGroupAmongSiblings swaps a group with the sibling delta positions away in
+// display order (-1 = up, +1 = down).
+//
+// It works over the group's siblings rather than over adjacent GroupList entries.
+// GroupList is a flattened depth-first tree, so the slot next to a root group is
+// usually one of some group's subgroups, not the next root group: with "todolist"
+// (two date subgroups) sitting above "ai", the entry before "ai" is
+// "todolist/<date>", whose parent is "todolist" and not "". The old adjacency
+// check saw a non-sibling there and gave up, which made "ai" impossible to move
+// above "todolist" no matter how many times the key was pressed.
+func (t *GroupTree) moveGroupAmongSiblings(path string, delta int) {
+	if _, exists := t.Groups[path]; !exists {
+		return
+	}
+
+	// GroupList is already in display order, so filtering it by parent yields the
+	// siblings in the order they appear on screen.
+	parentPath := getParentPath(path)
+	siblings := make([]*Group, 0, len(t.GroupList))
+	idx := -1
+	for _, g := range t.GroupList {
+		if getParentPath(g.Path) != parentPath {
+			continue
+		}
+		if g.Path == path {
+			idx = len(siblings)
+		}
+		siblings = append(siblings, g)
+	}
+
+	target := idx + delta
+	if idx < 0 || target < 0 || target >= len(siblings) {
+		return
+	}
+
+	// Negative Order is a pin (conductor, and the Maestro group above it); every
+	// rebuildGroupList re-applies it, so a group swapped past a pin would just snap
+	// back on the next redraw. Refuse the move instead.
+	if siblings[idx].Order < 0 || siblings[target].Order < 0 {
+		return
+	}
+
+	// Normalize sibling Order to current display positions before swapping.
+	// Groups routinely share an Order value (anything created before ordering
+	// existed is Order 0) and are then tie-broken by name, so swapping the Order
+	// values as-is would be a no-op for the whole equal-Order block.
+	for i, g := range siblings {
+		if g.Order >= 0 {
+			g.Order = i
 		}
 	}
+	siblings[idx].Order, siblings[target].Order = siblings[target].Order, siblings[idx].Order
+
+	t.rebuildGroupList()
 }
 
 // MoveSessionUp moves a session up among its visual siblings: top-level
@@ -1035,6 +1089,75 @@ func (t *GroupTree) DemoteSession(inst *Instance) {
 	for i, s := range group.Sessions {
 		s.Order = i
 	}
+}
+
+// SessionPosition returns the index of inst in its group's session slice
+// (the order the storage layer sorts it in, sub-sessions and archived rows
+// included), or -1 when the group or the session is not in the tree. This
+// is the position `session set <id> order <n>` consumes, unlike the raw
+// Order value, which ties at 0 on every launch-appended row.
+func (t *GroupTree) SessionPosition(inst *Instance) int {
+	group, exists := t.Groups[inst.GroupPath]
+	if !exists {
+		return -1
+	}
+	for i, s := range group.Sessions {
+		if s.ID == inst.ID {
+			return i
+		}
+	}
+	return -1
+}
+
+// SetSessionOrder moves inst to index n in its group's session slice
+// (clamped to the last index) and renumbers the group 0..len-1, the same
+// way the K/J reorder keys do. Parent links and pins are untouched. No-op
+// when the group or the session is not in the tree.
+func (t *GroupTree) SetSessionOrder(inst *Instance, n int) {
+	group, exists := t.Groups[inst.GroupPath]
+	if !exists {
+		return
+	}
+	currentIdx := t.SessionPosition(inst)
+	if currentIdx < 0 {
+		return
+	}
+
+	s := group.Sessions[currentIdx]
+	group.Sessions = append(group.Sessions[:currentIdx], group.Sessions[currentIdx+1:]...)
+	if n > len(group.Sessions) {
+		n = len(group.Sessions)
+	}
+	if n < 0 {
+		n = 0
+	}
+	group.Sessions = append(group.Sessions[:n], append([]*Instance{s}, group.Sessions[n:]...)...)
+
+	for i, s := range group.Sessions {
+		s.Order = i
+	}
+}
+
+// ResolveMoveTargetGroup maps a user-supplied move target to a group path the
+// way `agent-deck group move` always has: "" and "root" mean the default
+// group; otherwise an exact match, then a case-insensitive match against the
+// existing groups, and failing both a new group via CreateGroup (which
+// sanitizes the name). Shared by the CLI and the web move endpoint (#2368) so
+// the same input lands a session in the same group from either surface.
+func (t *GroupTree) ResolveMoveTargetGroup(target string) string {
+	if target == "" || target == "root" || target == DefaultGroupPath {
+		return DefaultGroupPath
+	}
+	if _, ok := t.Groups[target]; ok {
+		return target
+	}
+	lower := strings.ToLower(target)
+	for path := range t.Groups {
+		if strings.ToLower(path) == lower {
+			return path
+		}
+	}
+	return t.CreateGroup(target).Path
 }
 
 // MoveSessionToGroup moves a session to a different group

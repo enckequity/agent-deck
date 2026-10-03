@@ -1,6 +1,8 @@
 package session
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -9,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/asheshgoplani/agent-deck/internal/events"
 )
 
 const (
@@ -54,12 +58,10 @@ type TransitionNotificationEvent struct {
 	// applies. Observability hook only — does not affect delivery/dedup.
 	Substate string `json:"substate,omitempty"`
 
-	// LastOutputHash is a cheap stable signal (e.g. SHA-1 of the last N
-	// bytes of the child's tmux pane at transition time) used by the
-	// notifier's #1142 dedup to suppress repeated [EVENT] notifications
-	// for a dormant child whose pane content hasn't changed. Optional —
-	// empty string disables hash-based dedup and falls back to the legacy
-	// 90s short window.
+	// LastOutputHash is a stable per-turn signal used by the notifier's #1142
+	// deduplication. Claude uses a transcript-derived signal; Codex uses its
+	// persisted hook generation or sequence. Optional — an empty string disables
+	// hash-based deduplication and falls back to the legacy 90-second short window.
 	LastOutputHash string `json:"last_output_hash,omitempty"`
 
 	// OutputHashStale marks an interactive transition whose LastOutputHash did
@@ -116,6 +118,31 @@ type TransitionNotificationEvent struct {
 	// Flows to the dead-letter record and the operator-visible missed-log line so
 	// a misconfiguration is distinguishable from a benign suppression.
 	DeadLetterReason string `json:"dead_letter_reason,omitempty"`
+
+	// Turn tiering (issue #2469). All omitempty: a record from an older
+	// producer has none of them and is treated as urgent by consumers.
+	//
+	// Tier is urgent|info (noise never becomes a record). Trigger names what
+	// started the child's turn (human|send|task|system|inbox|unknown). Text
+	// is the child's new final assistant text, capped at [inbox]
+	// max_text_bytes, so the parent acts on the record instead of re-reading
+	// the child. TextHash identifies the text; TurnUUID the transcript record.
+	// Question marks a parent-facing question. Seq is the child's turn-journal
+	// sequence for this turn, FromID the sender of a tagged send.
+	Tier     string `json:"tier,omitempty"`
+	Trigger  string `json:"trigger,omitempty"`
+	TurnUUID string `json:"turn_uuid,omitempty"`
+	TextHash string `json:"text_hash,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Question bool   `json:"question,omitempty"`
+	Seq      int64  `json:"seq,omitempty"`
+	FromID   string `json:"from_id,omitempty"`
+}
+
+// IsUrgent reports whether a consumer must wake for this record: an explicit
+// urgent tier, or a legacy record with no tier at all.
+func (e TransitionNotificationEvent) IsUrgent() bool {
+	return e.Tier == "" || e.Tier == TurnTierUrgent
 }
 
 // transitionKindFinished marks a TransitionNotificationEvent as a worker-
@@ -165,6 +192,15 @@ type TransitionNotifier struct {
 	// transition — same anti-flood discipline as the orphan log.
 	terminalMu   sync.Mutex
 	terminalSeen map[string]bool
+
+	// overflowMu guards overflowWarned, the set of children whose parent inbox
+	// is saturated at maxPendingTurnsPerChild. Backpressure stays retryable, so
+	// without a signal here a stalled parent makes its child re-observe the
+	// same transition every poll with nothing in any log — the runaway class
+	// the dead-letter work removed. Cleared once a commit for that child
+	// succeeds, so a second stall is reported again.
+	overflowMu     sync.Mutex
+	overflowWarned map[string]bool
 
 	// outputHashDedupTTLOverride lets tests shrink the issue #1142
 	// output-hash dedup window without waiting hours of wall-clock time.
@@ -222,13 +258,19 @@ func NewTransitionNotifier() *TransitionNotifier {
 // terminalDrop records a synchronously-determined terminal-undeliverable event
 // (audit B5/B9). Intentional suppressions (no_notify, self_conductor) are silent
 // and orphan is already logged once at resolve time, so those return early.
-// Every other reason (child_removed, parent_removed/cross-profile, unresolvable)
-// gets an operator-visible missed-log line AND a dead-letter record, deduped
-// once per (child|reason) so a chatty child can't flood. This is what makes a
-// dropped completion visible instead of silent.
+// child_removed (the conductor removed the worker between observe and resolve)
+// is log-only: the operator sees a missed-log line, but no dead-letter record
+// is parked because nothing can ack one and the record has no recipient
+// (messaging audit P1-4, #2101). Every other reason (parent_removed /
+// cross-profile, unresolvable) gets an operator-visible missed-log line AND a
+// dead-letter record, deduped once per (child|reason) so a chatty child can't
+// flood. This is what makes a dropped completion visible instead of silent.
 func (n *TransitionNotifier) terminalDrop(event TransitionNotificationEvent, reason string) {
 	switch reason {
 	case "", deadLetterReasonNoNotify, deadLetterReasonSelfConductor, deadLetterReasonOrphan:
+		return
+	case deadLetterReasonChildMissing:
+		n.logMissed(event, reason)
 		return
 	}
 	key := strings.TrimSpace(event.ChildSessionID) + "|" + reason
@@ -305,7 +347,11 @@ func instanceAcceptsTransitionEvents(inst *Instance) bool {
 // outbox (issue #1225: PULL, not push). A busy conductor drains it at its own
 // turn boundary, so delivery no longer depends on an idle window that never
 // opens. Synchronous returns: committed_inbox / dropped_no_target / failed.
-func (n *TransitionNotifier) NotifyTransition(event TransitionNotificationEvent) TransitionNotificationEvent {
+func (n *TransitionNotifier) NotifyTransition(event TransitionNotificationEvent) (result TransitionNotificationEvent) {
+	// Slice 4 (CORE-PLAN): additive tap onto the event bus, independent of
+	// (and never gating) the durable outbox commit below.
+	defer func() { publishTransitionEvent("session.transition", result) }()
+
 	event.FromStatus = strings.ToLower(strings.TrimSpace(event.FromStatus))
 	event.ToStatus = strings.ToLower(strings.TrimSpace(event.ToStatus))
 	event.Profile = strings.TrimSpace(event.Profile)
@@ -367,7 +413,9 @@ func (n *TransitionNotifier) NotifyTransition(event TransitionNotificationEvent)
 // by ShouldNotifyTransition (a finished event has no from→to transition);
 // per-task idempotency is the daemon's responsibility (it only calls this when
 // the detected sentinel actually changed).
-func (n *TransitionNotifier) NotifyFinished(event TransitionNotificationEvent) TransitionNotificationEvent {
+func (n *TransitionNotifier) NotifyFinished(event TransitionNotificationEvent) (result TransitionNotificationEvent) {
+	defer func() { publishTransitionEvent("session.finished", result) }()
+
 	event.Kind = transitionKindFinished
 	event.Profile = strings.TrimSpace(event.Profile)
 	event.ChildTitle = strings.TrimSpace(event.ChildTitle)
@@ -405,6 +453,13 @@ func (n *TransitionNotifier) NotifyFinished(event TransitionNotificationEvent) T
 	return event
 }
 
+// publishTransitionEvent is the slice-4 (CORE-PLAN) tap onto the event bus.
+// It never affects delivery: NotifyTransition/NotifyFinished's outbox commit
+// is unchanged by this call, win or lose. The process owner flushes at exit.
+func publishTransitionEvent(kind string, event TransitionNotificationEvent) {
+	events.PublishProfile(event.Profile, kind, event.ChildSessionID, event)
+}
+
 func resolveParentNotificationTarget(child *Instance, byID map[string]*Instance) *Instance {
 	if child == nil {
 		return nil
@@ -420,12 +475,12 @@ func resolveParentNotificationTarget(child *Instance, byID map[string]*Instance)
 	if parent.ID == child.ID {
 		return nil
 	}
-	if isConductorSessionTitle(parent.Title) {
-		_ = parent.UpdateStatus()
-		if !isLiveSessionStatus(parent.Status) {
-			return nil
-		}
-	}
+	// Messaging audit P1-4 (#2101, #2062): there is deliberately no
+	// conductor-liveness gate here. A registered parent that is not
+	// running|waiting|idle at this instant (restarting, stopped, mid-switch)
+	// is exactly what the durable inbox is for — it drains the record at its
+	// next turn. Gating on liveness diverted such completions to _unowned +
+	// dead-letter, where nothing could ever re-attach or ack them.
 	return parent
 }
 
@@ -464,12 +519,21 @@ func (n *TransitionNotifier) isDuplicate(event TransitionNotificationEvent) bool
 
 	elapsed := event.Timestamp.Unix() - record.At
 
-	if record.From == event.FromStatus && record.To == event.ToStatus && elapsed <= shortWindowDedupSeconds {
+	// A supplied turn signal is authoritative, but only when BOTH sides carry
+	// one — otherwise there is nothing to compare and the legacy window is the
+	// floor. Requiring both sides to be empty would let a child whose signal is
+	// momentarily unavailable re-emit the identical transition (issue #1187).
+	if (event.LastOutputHash == "" || record.OutputHash == "") &&
+		record.From == event.FromStatus && record.To == event.ToStatus && elapsed <= shortWindowDedupSeconds {
 		return true
 	}
 
+	// Issue #2469: waiting and idle are one attention class. A turn signal
+	// that identifies the turn (turn:<uuid> / text:<hash>) already proves the
+	// child said nothing new, so a waiting→idle flip with the same signal is
+	// the same turn, not a second record.
 	if event.LastOutputHash != "" &&
-		record.To == event.ToStatus &&
+		attentionClass(record.To) == attentionClass(event.ToStatus) &&
 		record.OutputHash == event.LastOutputHash &&
 		elapsed <= int64(n.outputHashTTL().Seconds()) {
 		return true
@@ -530,14 +594,23 @@ func transitionEventOutputHash(inst *Instance) string {
 	return transitionContentSignal(inst)
 }
 
-// transitionContentSignal returns a dedup signal derived from the child's
-// transcript size. A Claude-compatible JSONL transcript is append-only and
-// grows ONLY when a real message is written (user prompt, assistant turn, tool
-// call) — it is completely untouched when the pane merely redraws its animated
-// chrome. So the signal stays identical across idle polls and strictly changes
-// on a genuine new turn. Returns "" when no transcript is resolvable (e.g.
-// non-Claude tools), which routes the caller to the legacy 90s window.
+// transitionContentSignal returns a stable signal for the child's logical turn.
+// Claude uses the append-only transcript size; Codex uses its persisted hook
+// generation or sequence. Returns "" when neither source is available, which
+// routes the caller to the legacy 90-second window.
 func transitionContentSignal(inst *Instance) string {
+	if signal := codexTurnSignal(inst); signal != "" {
+		return signal
+	}
+	// Issue #2469: identify the TURN (the assistant record that finished it),
+	// not the file size, so background task notifications and hook re-fires
+	// that grow the transcript without a new reply do not look like new turns.
+	// Falls through to the size signal when the tail cannot be classified.
+	if facts, ok := instanceTurnFacts(inst); ok && !facts.Pending {
+		if signal := facts.Signal(); signal != "" {
+			return signal
+		}
+	}
 	path := inst.GetJSONLPath()
 	if path == "" {
 		return ""
@@ -547,6 +620,35 @@ func transitionContentSignal(inst *Instance) string {
 		return ""
 	}
 	return fmt.Sprintf("jsonl:%d", info.Size())
+}
+
+// codexTurnSignal returns a durable per-turn signal from the Codex hook state.
+// Codex does not expose a Claude-compatible JSONL transcript, but its hook
+// watcher persists a completed generation and a monotonic sequence. Both are
+// stable across notifier polls and process restarts.
+func codexTurnSignal(inst *Instance) string {
+	if inst == nil || !strings.EqualFold(strings.TrimSpace(inst.Tool), "codex") {
+		return ""
+	}
+	hs := readHookStatusFile(inst.ID)
+	if hs == nil || inst.codexHookFromForeignThread(hs) {
+		return ""
+	}
+	// The generic hook sequence advances for noise as well as completions.  Only
+	// the Codex writer's start/completion-bound sequence is a turn identity.
+	if hs.CodexCompletedSequence > 0 && hs.CodexStartedSequence == hs.CodexCompletedSequence {
+		generation := strings.TrimSpace(hs.CodexCompletedGeneration)
+		if generation != "" {
+			sum := sha256.Sum256([]byte(generation))
+			return fmt.Sprintf("codex-completion:%d:%s", hs.CodexCompletedSequence, hex.EncodeToString(sum[:]))
+		}
+		return fmt.Sprintf("codex-completion:%d", hs.CodexCompletedSequence)
+	}
+	if generation := strings.TrimSpace(hs.CodexCompletedGeneration); generation != "" {
+		sum := sha256.Sum256([]byte(generation))
+		return "codex-generation-sha256:" + hex.EncodeToString(sum[:])
+	}
+	return ""
 }
 
 func (n *TransitionNotifier) markNotified(event TransitionNotificationEvent) {
@@ -630,12 +732,21 @@ func (n *TransitionNotifier) logEvent(event TransitionNotificationEvent) {
 	if err != nil {
 		return
 	}
-	f, err := os.OpenFile(n.logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
+	if err := appendLogLine(n.logPath, line); err != nil {
+		commsLog.Debug("transition_notify_log_write_failed", slog.String("path", n.logPath), slog.String("error", err.Error()))
 	}
-	defer f.Close()
-	_, _ = f.Write(append(line, '\n'))
+}
+
+// appendLogLine appends line plus a newline to the log at path, reporting
+// open, write and close failures alike.
+func appendLogLine(path string, line []byte) (err error) {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer closeFile(f, &err)
+	_, err = f.Write(append(line, '\n'))
+	return err
 }
 
 func (n *TransitionNotifier) logMissed(event TransitionNotificationEvent, reason string) {
@@ -670,12 +781,9 @@ func (n *TransitionNotifier) logMissed(event TransitionNotificationEvent, reason
 	if err != nil {
 		return
 	}
-	f, err := os.OpenFile(n.missedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
+	if err := appendLogLine(n.missedPath, line); err != nil {
+		commsLog.Debug("transition_notify_missed_log_write_failed", slog.String("path", n.missedPath), slog.String("error", err.Error()))
 	}
-	defer f.Close()
-	_, _ = f.Write(append(line, '\n'))
 }
 
 // --- paths -------------------------------------------------------------------
@@ -751,10 +859,7 @@ func (n *TransitionNotifier) logOrphanOnce(event TransitionNotificationEvent, ch
 	if err != nil {
 		return
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
+	if err := appendLogLine(path, line); err != nil {
+		commsLog.Debug("transition_notify_orphan_log_write_failed", slog.String("path", path), slog.String("error", err.Error()))
 	}
-	defer f.Close()
-	_, _ = f.Write(append(line, '\n'))
 }

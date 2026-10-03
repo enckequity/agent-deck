@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -43,7 +44,7 @@ type wakeNudgeWiring struct {
 	nudger *WakeNudger
 	now    func() time.Time
 	isIdle func(parent *Instance) bool
-	send   func(parent *Instance, profile string) error
+	send   func(parent *Instance, profile, message string) error
 }
 
 // defaultWakeNudgeWiring is the production wiring: a debounced nudger, the wall
@@ -56,6 +57,23 @@ func defaultWakeNudgeWiring() *wakeNudgeWiring {
 		isIdle: parentIsNudgeableIdle,
 		send:   sendWakeNudge,
 	}
+}
+
+// nudge runs one debounced, idle-gated wake send of message to parent through
+// the wiring's injected clock, idle probe and sender.
+func (w *wakeNudgeWiring) nudge(parent *Instance, profile, message string) (bool, error) {
+	now := time.Now()
+	if w.now != nil {
+		now = w.now()
+	}
+	isIdle := func() bool { return w.isIdle != nil && w.isIdle(parent) }
+	send := func() error {
+		if w.send == nil {
+			return nil
+		}
+		return w.send(parent, profile, message)
+	}
+	return w.nudger.Nudge(parent.ID, now, isIdle, send)
 }
 
 // fireWakeNudge invokes the Tier-2 wake-nudge for a parent that just had a
@@ -76,19 +94,10 @@ func (n *TransitionNotifier) fireWakeNudge(parent *Instance, event TransitionNot
 		}
 	}()
 
-	now := time.Now()
-	if w.now != nil {
-		now = w.now()
-	}
-	profile := event.Profile
-	isIdle := func() bool { return w.isIdle != nil && w.isIdle(parent) }
-	send := func() error {
-		if w.send == nil {
-			return nil
-		}
-		return w.send(parent, profile)
-	}
-	if _, err := w.nudger.Nudge(parent.ID, now, isIdle, send); err != nil {
+	// Issue #2469: the wake line names the record it is for; the record
+	// itself (text included) is injected by the parent's prompt-time drain
+	// into the turn this line starts.
+	if _, err := w.nudge(parent, event.Profile, NudgeHeadline(event)); err != nil {
 		// Best-effort: a failed wake is harmless. Log once at debug-ish level so
 		// the operator can see WHY a pane wasn't woken without it being an error.
 		commsLog.Warn("wake_nudge_send_failed",
@@ -103,12 +112,18 @@ func (n *TransitionNotifier) fireWakeNudge(parent *Instance, event TransitionNot
 // (issue #36326) — the exact failure the pull model was built to avoid — so a
 // busy conductor is left to drain at its own turn boundary.
 //
-// parent.Status is read directly (not re-probed): the conductor branch of
-// resolveParentNotificationTarget freshly UpdateStatus()'d this same instance
-// moments earlier on the commit path, so a second tmux round-trip would add cost
-// without adding freshness.
+// The status is re-probed here, under the daemon's probe budget, through the
+// same source the sync pass uses (hook-driven state first, pane fallback).
+// Review round 2 (P2-D): the liveness gate that used to UpdateStatus() the
+// parent on the commit path is gone, so without this probe the gate read the
+// registry row as last persisted: a stale `running` withheld the wake and the
+// completion waited for the next heartbeat. A probe that overruns the budget
+// counts as not idle (the record still drains on the parent's next turn).
 func parentIsNudgeableIdle(parent *Instance) bool {
 	if parent == nil || !isConductorSessionTitle(parent.Title) {
+		return false
+	}
+	if refreshStatusBounded(parent, statusProbeBudget) {
 		return false
 	}
 	switch parent.Status {
@@ -124,25 +139,54 @@ func parentIsNudgeableIdle(parent *Instance) bool {
 // slow/stuck send never blocks the producer commit path; the gate that this is
 // only reached for an IDLE pane means the send won't sit in tmux's busy-queue.
 // A failed send is harmless (the record still drains on the next turn).
-func sendWakeNudge(parent *Instance, profile string) error {
+func sendWakeNudge(parent *Instance, profile, message string) error {
 	if parent == nil {
 		return nil
 	}
-	go func(profile, ref string) {
-		if err := sendWakeNudgeNoWait(profile, ref); err != nil {
+	if strings.TrimSpace(message) == "" {
+		message = wakeNudgeMessage
+	}
+	go func(profile, ref, message string) {
+		if err := sendWakeNudgeNoWait(profile, ref, message); err != nil {
 			commsLog.Warn("wake_nudge_dispatch_failed",
 				slog.String("parent", ref), slog.String("error", err.Error()))
 		}
-	}(profile, parent.ID)
+	}(profile, parent.ID, message)
 	return nil
 }
 
-// wakeNudgeSendTimeout bounds the detached wake-nudge subprocess. --no-wait
-// already returns fast, so 5s is generous; the bound exists purely so a wedged
-// agent-deck binary (e.g. stuck on SQLite/tmux) is reaped instead of leaking the
-// dispatch goroutine indefinitely (PR #1230 audit). A timed-out send is harmless
-// like any dropped nudge — the record still drains on the next turn/heartbeat.
-const wakeNudgeSendTimeout = 5 * time.Second
+// fireDigestNudge wakes an idle parent once for info that waited past the
+// digest window (issue #2469). Same gate and debounce as the urgent wake;
+// the records themselves arrive through the prompt-time drain.
+func (n *TransitionNotifier) fireDigestNudge(parent *Instance, profile, message string) bool {
+	w := n.wake
+	if w == nil || w.nudger == nil || parent == nil {
+		return false
+	}
+	sent, err := w.nudge(parent, profile, message)
+	if err != nil {
+		commsLog.Warn("digest_nudge_send_failed",
+			slog.String("parent", parent.ID), slog.String("error", err.Error()))
+		return false
+	}
+	return sent
+}
+
+// wakeNudgeDeliveryBudget is the time the nudge subprocess gets for the send
+// itself once it holds the target's send lock: the --no-wait pipeline's
+// composer preflight, settle, guard hold, paste and verification add up to
+// well under this.
+const wakeNudgeDeliveryBudget = 15 * time.Second
+
+// wakeNudgeSendTimeout bounds the detached wake-nudge subprocess. The bound
+// exists so a wedged agent-deck binary (e.g. stuck on SQLite/tmux) is reaped
+// instead of leaking the dispatch goroutine indefinitely (PR #1230 audit). It
+// must cover the per-target send lock wait (review round 2, P3): the nudge
+// queues behind a heartbeat or sibling send holding the target, and a shorter
+// timeout killed it while it was still waiting on the flock, so the nudge was
+// silently dropped. A timed-out send is still harmless like any dropped nudge:
+// the record drains on the next turn/heartbeat.
+const wakeNudgeSendTimeout = SendTargetLockWait + wakeNudgeDeliveryBudget
 
 // wakeNudgeExec runs the resolved command under ctx. It is a package var so a
 // test can substitute a spy and assert the deadline/args without spawning a real
@@ -156,7 +200,7 @@ var wakeNudgeExec = func(ctx context.Context, bin string, args ...string) error 
 // the agent's ready state nor waits for a reply, so it returns fast even if the
 // pane is wedged. The context deadline is a belt-and-suspenders backstop for the
 // case where even the subprocess itself hangs.
-func sendWakeNudgeNoWait(profile, ref string) error {
+func sendWakeNudgeNoWait(profile, ref, message string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), wakeNudgeSendTimeout)
 	defer cancel()
 	bin := agentDeckBinaryPath()
@@ -164,6 +208,6 @@ func sendWakeNudgeNoWait(profile, ref string) error {
 	if profile != "" {
 		args = append(args, "-p", profile)
 	}
-	args = append(args, "session", "send", ref, wakeNudgeMessage, "--no-wait", "-q")
+	args = append(args, "session", "send", ref, message, "--no-wait", "-q")
 	return wakeNudgeExec(ctx, bin, args...)
 }

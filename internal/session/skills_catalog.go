@@ -34,6 +34,13 @@ const (
 	defaultSkillSourceClaude = "claude-global"
 )
 
+// projectOMPSkillsDir is the project-local skills directory Oh My Pi
+// discovers on its own (`.omp/skills/<name>/SKILL.md` — a directory-per-skill
+// shape matching Claude's own convention, confirmed against the upstream
+// repo's own `.omp/skills/semantic-compression/SKILL.md` layout), distinct
+// from the flat AGENTS.md-adjacent dir gemini/codex/pi share.
+const projectOMPSkillsDir = ".omp/skills"
+
 var (
 	ErrSkillSourceExists    = errors.New("skill source already exists")
 	ErrSkillSourceNotFound  = errors.New("skill source not found")
@@ -131,7 +138,7 @@ func skillIDForAttachment(a ProjectSkillAttachment) string {
 }
 
 func knownProjectSkillsDirs() []string {
-	return []string{projectClaudeSkillsDir, projectAgentsSkillsDir, projectHermesSkillsDir}
+	return []string{projectClaudeSkillsDir, projectAgentsSkillsDir, projectHermesSkillsDir, projectOMPSkillsDir}
 }
 
 // SupportsProjectSkills reports whether the runtime supports project skill materialization.
@@ -155,6 +162,8 @@ func GetProjectSkillsDir(tool string) (string, bool) {
 		return projectAgentsSkillsDir, true
 	case tool == "hermes":
 		return projectHermesSkillsDir, true
+	case tool == "omp":
+		return projectOMPSkillsDir, true
 	default:
 		return "", false
 	}
@@ -878,7 +887,7 @@ func ListMaterializedProjectSkills(projectPath string) ([]MaterializedProjectSki
 	return materialized, nil
 }
 
-func copyFile(src, dst string) error {
+func copyFile(src, dst string) (err error) {
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return err
@@ -898,7 +907,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer closeFile(dstFile, &err)
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
 		return err
@@ -1527,7 +1536,7 @@ func (p *projectRoot) openSourceRootFor(resolved string) (*containedSource, erro
 // registered skill source root) to dstRel inside dstRoot, so neither side of
 // the copy can be redirected outside its root by a hostile path swap. A
 // symlinked source file is followed only within srcRoot; escapes error.
-func copyFileIntoRoot(dstRoot, srcRoot *os.Root, srcRel, dstRel string) error {
+func copyFileIntoRoot(dstRoot, srcRoot *os.Root, srcRel, dstRel string) (err error) {
 	srcFile, err := srcRoot.Open(srcRel)
 	if err != nil {
 		return err
@@ -1553,7 +1562,7 @@ func copyFileIntoRoot(dstRoot, srcRoot *os.Root, srcRel, dstRel string) error {
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer closeFile(dstFile, &err)
 
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
 		return err

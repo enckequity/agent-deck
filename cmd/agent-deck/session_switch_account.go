@@ -24,6 +24,7 @@ func handleSessionSwitchAccount(profile string, args []string) {
 	quiet := fs.Bool("quiet", false, "Minimal output")
 	quietShort := fs.Bool("q", false, "Minimal output (short)")
 	noRestart := fs.Bool("no-restart", false, "Do not restart a running session after the switch")
+	archiveDestination := fs.Bool("archive-destination", false, "Install the source conversation even when the destination holds a newer or undated copy; the destination copy is archived next to it, never deleted")
 
 	fs.Usage = func() {
 		fmt.Println("Usage: agent-deck session switch-account <id|title> <account> [options]")
@@ -36,6 +37,14 @@ func handleSessionSwitchAccount(profile string, args []string) {
 		fmt.Println("source account keeps its copy), the session's account field is updated, and")
 		fmt.Println("a running session is restarted so `claude --resume` continues the")
 		fmt.Println("conversation under the new account.")
+		fmt.Println()
+		fmt.Println("Claude Code may key one working directory under several project directories")
+		fmt.Println("(the path as typed, its macOS /private form, its realpath). Every copy of the")
+		fmt.Println("conversation under those keys in BOTH accounts is considered; the newest by")
+		fmt.Println("last event (tie: longest) wins, is installed under every key in the target,")
+		fmt.Println("and each copy it replaces is backed up next to it. A newer target copy is")
+		fmt.Println("kept, never overwritten. The receipt names the chosen copy; --json carries")
+		fmt.Println("every candidate under \"transcript\".")
 		fmt.Println()
 		fmt.Println("If the session has no recorded conversation id and the only candidate is the")
 		fmt.Println("newest transcript in its working directory (which may belong to another")
@@ -83,12 +92,18 @@ func handleSessionSwitchAccount(profile string, args []string) {
 	}
 
 	result, switchErr := session.SwitchAccount(userConfig, inst, account, session.AccountSwitchOptions{
-		NoRestart: *noRestart,
+		NoRestart:          *noRestart,
+		Storage:            storage,
+		ArchiveDestination: *archiveDestination,
 	})
 	if result == nil {
 		// Every abort path leaves the instance untouched, so there is nothing
 		// to persist.
-		out.Error(switchErr.Error(), ErrCodeInvalidOperation)
+		message := switchErr.Error()
+		if errors.Is(switchErr, session.ErrSwitchDestinationDivergent) {
+			message += "; re-run with --archive-destination to archive it and switch anyway"
+		}
+		out.Error(message, ErrCodeInvalidOperation)
 		os.Exit(1)
 	}
 	for _, warning := range result.Warnings {
@@ -114,13 +129,15 @@ func handleSessionSwitchAccount(profile string, args []string) {
 
 	out.Success(fmt.Sprintf("Switched %s: account %q -> %q; %s", inst.Title, result.OldAccount, result.NewAccount, result.Conversation),
 		map[string]interface{}{
-			"success":           true,
-			"id":                inst.ID,
-			"title":             inst.Title,
-			"old_account":       result.OldAccount,
-			"new_account":       result.NewAccount,
-			"migrated_path":     result.MigratedPath,
-			"claude_session_id": inst.ClaudeSessionID,
-			"restarted":         result.Restarted,
+			"success":              true,
+			"id":                   inst.ID,
+			"title":                inst.Title,
+			"old_account":          result.OldAccount,
+			"new_account":          result.NewAccount,
+			"migrated_path":        result.MigratedPath,
+			"destination_archived": result.DestinationArchived,
+			"transcript":           result.Transcript,
+			"claude_session_id":    inst.ClaudeSessionID,
+			"restarted":            result.Restarted,
 		})
 }
