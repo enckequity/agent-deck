@@ -126,10 +126,17 @@ type UserConfig struct {
 	// available, falling back to tmux keystrokes otherwise. Discussion #2089.
 	SendTransport string `toml:"send_transport,omitempty"`
 
+	// Send tunes `agent-deck session send` ([send] section). See SendSettings.
+	Send SendSettings `toml:"send,omitempty"`
+
 	// Inbox tunes what reaches a parent session and when (issue #2469):
 	// which tiers wake it, how much child text a record carries, the info
 	// digest window. See InboxConfig.
 	Inbox InboxConfig `toml:"inbox,omitempty"`
+
+	// Comms is the [comms] section: the one switch of the Comms Ledger
+	// (docs/comms.md). Off by default while the ledger is canaried.
+	Comms CommsSettings `toml:"comms,omitempty"`
 
 	// MCPs defines available MCP servers for the MCP Manager
 	// These can be attached/detached per-project via the MCP Manager (M key)
@@ -320,6 +327,16 @@ type UserConfig struct {
 	// Harnesses overrides the core install/login table per harness
 	// ([harnesses.<name>] binary, install_command, login_command, docs_url).
 	Harnesses map[string]harness.Override `toml:"harnesses,omitempty"`
+}
+
+// CommsSettings is the [comms] section.
+type CommsSettings struct {
+	// Ledger turns the Comms Ledger on: the hooks agent-deck installs spool
+	// the text they receive, the notify daemon commits one record per turn
+	// to <data>/comms/<profile>/, and `agent-deck msg` reads it. Off: no
+	// spool file is written and no ledger directory is created. The old
+	// inbox, turn journal and inbox stats keep working either way.
+	Ledger bool `toml:"ledger,omitempty"`
 }
 
 // MacappSettings is the [macapp] section. Everything is off by default.
@@ -1094,6 +1111,13 @@ type RemoteConfig struct {
 	// hosts where it is not on the non-login SSH PATH (e.g.
 	// "/opt/homebrew/bin/mosh-server"). Empty uses mosh's default.
 	MoshServer string `toml:"mosh_server,omitempty"`
+
+	// TalkbackIntervalSecs makes the notify-daemon pull this remote's child
+	// records into every enrolled local conductor's inbox on its own, every
+	// N seconds (0 = off, the default; 30 is a good value). A conductor is
+	// enrolled once it has drained the remote (`remote drain`), which leaves a
+	// cursor behind.
+	TalkbackIntervalSecs int `toml:"talkback_interval_secs,omitempty"`
 }
 
 // Remote attach transports accepted by RemoteConfig.Transport.
@@ -1528,6 +1552,15 @@ type UpdateSettings struct {
 	// the named remote by hand, regardless of this setting.
 	SweepRemotes *bool `toml:"sweep_remotes,omitempty"`
 
+	// ManageTimer lets agent-deck install and heal its own update timer
+	// (launchd on macOS, systemd --user on Linux) without a separate
+	// `update --install-timer`: `update --unattended`, the TUI's periodic
+	// check, the notify daemon at start and `remote update` install it
+	// where none is active and migrate a hand-made agentdeck-autoupdate
+	// pair (#2472). Default: true (nil = true); set false to manage the
+	// timer by hand.
+	ManageTimer *bool `toml:"manage_timer,omitempty"`
+
 	// NotifyInCLI shows update notification in CLI commands (not just TUI)
 	// Default: true (nil = true)
 	NotifyInCLI *bool `toml:"notify_in_cli,omitempty"`
@@ -1556,6 +1589,15 @@ func (u UpdateSettings) GetSweepRemotes() bool {
 		return false
 	}
 	return *u.SweepRemotes
+}
+
+// GetManageTimer reports whether agent-deck installs and heals its own
+// update timer (default: true).
+func (u UpdateSettings) GetManageTimer() bool {
+	if u.ManageTimer == nil {
+		return true
+	}
+	return *u.ManageTimer
 }
 
 // GetCheckEnabled returns whether update checks are enabled (default: true).
@@ -1987,6 +2029,23 @@ func (c *UserConfig) GetSendTransport() string {
 		return "auto"
 	}
 	return "tmux"
+}
+
+// SendSettings is the [send] section.
+type SendSettings struct {
+	// TagSends prefixes a send made from inside an agent-deck session with
+	// one "[agent-deck from:<sender-id>]" line so the receiver's reply is
+	// routed back to the sender (comms redesign PR5). Default true (nil).
+	TagSends *bool `toml:"tag_sends,omitempty"`
+}
+
+// GetTagSends reports whether `session send` tags agent-originated sends.
+// Default true; only an explicit tag_sends = false turns it off.
+func (c *UserConfig) GetTagSends() bool {
+	if c == nil || c.Send.TagSends == nil {
+		return true
+	}
+	return *c.Send.TagSends
 }
 
 // ClaudeSettings defines Claude Code configuration
@@ -5402,6 +5461,10 @@ check_enabled = true
 # Push the controller's binary onto every configured remote after an
 # install, instead of nudging remotes to pull it themselves (default: false)
 # sweep_remotes = true
+# Install and heal the update timer automatically (unattended runs, the TUI,
+# the notify daemon, remote update); false leaves it to --install-timer
+# (default: true)
+# manage_timer = false
 # Show update notification in CLI commands, not just TUI (default: true)
 notify_in_cli = true
 

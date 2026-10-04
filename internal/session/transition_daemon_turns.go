@@ -2,6 +2,7 @@ package session
 
 import (
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -65,7 +66,21 @@ func (d *TransitionDaemon) emitTurn(profile string, inst *Instance, byID map[str
 		// Legacy signal, no text: emit as before. The notifier's dedup is the
 		// only improvement available without a transcript.
 		_ = BumpInboxStats(statsParent, func(s *InboxStats) { s.RecordsLegacy++ })
-		return d.notifier.NotifyTransition(event), true
+		result := d.notifier.NotifyTransition(event)
+		// Comms Ledger: the same edge, spooled after the inbox record so a
+		// ledger problem can never delay or lose the parent's wake.
+		d.commsStatusEdge(inst, from, to, event.Timestamp)
+		return result, true
+	}
+
+	// Issue #2473: the task turn that settles background work a held tagged
+	// send started answers that send. Carry the sender over so it receives
+	// the result (the held send turn itself was never recorded).
+	var carried *heldSendOrigin
+	if facts.Trigger == TurnTriggerTask && strings.TrimSpace(facts.FromID) == "" {
+		if carried = loadHeldSend(inst.ID); carried != nil {
+			facts.FromID = carried.FromID
+		}
 	}
 
 	cfg := ResolveInboxConfig(parentTitleFor(inst, byID))
@@ -136,6 +151,19 @@ func (d *TransitionDaemon) emitTurn(profile string, inst *Instance, byID map[str
 	}
 	if result.DeliveryResult == transitionDeliveryFailed {
 		return result, false
+	}
+	// The held send is answered: by the task turn that carried its sender,
+	// or by the send turn itself once its hold lapsed. Either way no later
+	// turn may reply to that sender again.
+	if carried != nil {
+		clearHeldSend(inst.ID)
+	} else if facts.Trigger == TurnTriggerSend {
+		// Matched by turn, or by sender: a poll can remember the send while
+		// its turn is still writing, so the stored uuid may be an earlier
+		// assistant record of this same turn.
+		if held := loadHeldSend(inst.ID); held != nil && (held.UUID == facts.UUID || held.FromID == facts.FromID) {
+			clearHeldSend(inst.ID)
+		}
 	}
 	if _, err := AppendTurnJournal(entry, cfg.GetJournalKeep()); err != nil {
 		commsLog.Warn("turn_journal_append_failed",

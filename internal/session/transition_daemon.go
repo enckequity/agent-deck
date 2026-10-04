@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/asheshgoplani/agent-deck/internal/comms"
 	"github.com/asheshgoplani/agent-deck/internal/desknotify"
 	"github.com/asheshgoplani/agent-deck/internal/health"
 )
@@ -34,6 +35,9 @@ const (
 type hookTransitionCandidate struct {
 	ToStatus  string
 	Timestamp time.Time
+	// Event is the hook event behind the candidate (Stop, PermissionRequest,
+	// Notification, ...). Empty for candidates built without one.
+	Event string
 }
 
 type TransitionDaemon struct {
@@ -118,6 +122,17 @@ type TransitionDaemon struct {
 	// Accessed only from the single-threaded Run loop, like lastProbeStall.
 	lastDesktopNotify map[string]string
 
+	// Comms Ledger (docs/comms.md): one open ledger per profile with its
+	// daemon.lock handle, the time of the last failed open or commit per
+	// profile (retry backoff), the last prompt-start edge seen per child
+	// (the trigger of its next turn), and the last spool prune. Single-
+	// threaded, like the maps above.
+	ledgers          map[string]*comms.Ledger
+	ledgerLocks      map[string]*os.File
+	ledgerOpenFailed map[string]time.Time
+	commsPrompts     map[string]CommsSpoolEntry
+	lastCommsPrune   time.Time
+
 	// journalWriters holds the per-profile writer for the session event
 	// journal, resolved once per profile for the daemon's lifetime and nil
 	// when the [health] session_events kill switch is off. It is async so a
@@ -142,6 +157,11 @@ type TransitionDaemon struct {
 	recallBackfillStarted bool
 	// Join the worker before tests replace its shared configuration.
 	recallBackfillWG sync.WaitGroup
+
+	// remoteTalkback schedules the incremental remote drains for remotes
+	// with talkback_interval_secs (transition_daemon_remote.go). Lazily
+	// created by the Run loop.
+	remoteTalkback *remoteTalkbackScheduler
 }
 
 func NewTransitionDaemon() *TransitionDaemon {
@@ -180,6 +200,7 @@ func (d *TransitionDaemon) Run(ctx context.Context) error {
 
 	// Prime baseline once, then run adaptive loop.
 	interval := d.SyncOnce(ctx)
+	d.tickRemoteTalkback(ctx)
 	if interval <= 0 {
 		interval = notifyPollSlow
 	}
@@ -191,6 +212,7 @@ func (d *TransitionDaemon) Run(ctx context.Context) error {
 		case <-time.After(interval):
 			d.maybeStartInitialRecallBackfill(ctx)
 			interval = d.SyncOnce(ctx)
+			d.tickRemoteTalkback(ctx)
 			if interval <= 0 {
 				interval = notifyPollSlow
 			}
@@ -603,6 +625,9 @@ func (d *TransitionDaemon) syncProfile(profile string) time.Duration {
 	// Runs on EVERY pass, the first scan included — see the FIRST SCAN note on
 	// recordTerminalTurns for why suppressing it would recreate the field bug.
 	d.recordTerminalTurns(profile, byID, statuses, hookStatuses)
+	// Comms Ledger: a second, independent store fed from the producers'
+	// spool. Runs after the inbox path so nothing above changes.
+	d.ingestCommsSpool(profile, byID)
 	d.journalStatusChanges(profile, byID, statuses, substates)
 	if cfg, _ := LoadUserConfig(); cfg != nil && cfg.Macapp.TranscriptEvents {
 		transcriptGrowth.publish(profile, instances)
@@ -891,6 +916,9 @@ func (d *TransitionDaemon) recordTerminalTurns(
 
 	for id, to := range statuses {
 		if !isRecordableTurnStatus(to) {
+			if notifyEnabled {
+				d.rememberHeldSendFromPoll(byID[id], to)
+			}
 			continue
 		}
 		inst := byID[id]
@@ -1128,6 +1156,7 @@ func (d *TransitionDaemon) shutdown() {
 	// Flush any in-flight async dispatches before closing storage so their
 	// logEvent/logMissed writes aren't lost when the process exits.
 	d.Flush()
+	d.closeCommsLedgers()
 	for _, s := range d.storages {
 		if s != nil {
 			_ = s.Close()
@@ -1289,6 +1318,29 @@ func readHookStatusFile(instanceID string) *HookStatus {
 	return hookStatus
 }
 
+// rememberHeldSendFromPoll remembers the sender of a tagged send whose turn
+// handed off to background work, seen from the poll rather than a Stop hook
+// (issue #2473). A hook-less Claude session ([claude] hooks_enabled = false)
+// never yields a hook candidate, and neither does a Stop the notify daemon
+// missed while it was down; on both, the merged status stays running for the
+// whole workflow, so the send turn is never recorded. Without this the task
+// turn that settles the work would carry no sender and the sender would get
+// no reply. rememberHeldSend is idempotent per turn and skips a turn the
+// journal already holds, so the hook path and this one may both see the same
+// held turn, and a send turn answered during a menu or a lapsed hold is not
+// remembered again when the work resumes.
+func (d *TransitionDaemon) rememberHeldSendFromPoll(inst *Instance, status string) {
+	if inst == nil || normalizeStatusString(status) != string(StatusRunning) {
+		return
+	}
+	if !instanceAcceptsTransitionEvents(inst) || !backgroundWorkHoldsTurn(inst) {
+		return
+	}
+	if facts, ok := instanceTurnFacts(inst); ok {
+		rememberHeldSend(inst.ID, facts)
+	}
+}
+
 func (d *TransitionDaemon) emitHookTransitionCandidates(
 	profile string,
 	byID map[string]*Instance,
@@ -1309,6 +1361,24 @@ func (d *TransitionDaemon) emitHookTransitionCandidates(
 		// signal; suppress poll-inferred candidates for it. Interactive
 		// sessions (no completion record) are unaffected.
 		if CompletionRecordExists(profile, id) {
+			continue
+		}
+
+		// Issue #2473: a Stop hook that ended the turn by handing off to
+		// background work (a Workflow, background agents, shells, a Monitor)
+		// is not a finished turn. The merged status keeps such a session
+		// running; the hook file alone must not emit running -> waiting for
+		// it. The real edge is emitted when the work reports back and the
+		// session settles (snapshot path, trigger "task"). A permission
+		// request or elicitation is never held: the child is blocked on
+		// input while the work runs, and the parent must be told.
+		if !hookEventBlocksTurn(candidate.Event) &&
+			normalizeStatusString(current[id]) == string(StatusRunning) && backgroundWorkHoldsTurn(inst) {
+			// The held turn may be the only one that names a tagged send's
+			// sender; remember it so the turn that settles the work replies.
+			if facts, ok := instanceTurnFacts(inst); ok {
+				rememberHeldSend(inst.ID, facts)
+			}
 			continue
 		}
 
@@ -1382,20 +1452,20 @@ func terminalHookTransitionCandidate(tool string, hs *HookStatus) (hookTransitio
 	case "claude":
 		// SessionStart is intentionally excluded (initial prompt isn't task completion).
 		if event == "stop" || event == "permissionrequest" || event == "notification" {
-			return hookTransitionCandidate{ToStatus: to, Timestamp: hs.UpdatedAt}, true
+			return hookTransitionCandidate{ToStatus: to, Timestamp: hs.UpdatedAt, Event: hs.Event}, true
 		}
 	case "codex":
 		if isCodexTerminalHookEvent(event) {
-			return hookTransitionCandidate{ToStatus: to, Timestamp: hs.UpdatedAt}, true
+			return hookTransitionCandidate{ToStatus: to, Timestamp: hs.UpdatedAt, Event: hs.Event}, true
 		}
 	case "cursor":
 		// sessionStart is intentionally excluded (initial prompt isn't task completion).
 		if event == "stop" {
-			return hookTransitionCandidate{ToStatus: to, Timestamp: hs.UpdatedAt}, true
+			return hookTransitionCandidate{ToStatus: to, Timestamp: hs.UpdatedAt, Event: hs.Event}, true
 		}
 	case "hermes":
 		if event == "post_llm_call" || event == "postllmcall" || event == "onsessionend" || event == "on_session_end" {
-			return hookTransitionCandidate{ToStatus: to, Timestamp: hs.UpdatedAt}, true
+			return hookTransitionCandidate{ToStatus: to, Timestamp: hs.UpdatedAt, Event: hs.Event}, true
 		}
 	}
 	return hookTransitionCandidate{}, false

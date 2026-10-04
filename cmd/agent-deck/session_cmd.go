@@ -1806,6 +1806,30 @@ func handleSessionViewers(profile string, args []string) {
 	out.Print(human.String(), data)
 }
 
+// sessionShowStatusFields is the status pass `session show` makes and the
+// status keys it reports: status, substate, substate_detail and
+// background_work (issue #2473). It warms the tmux pane-title cache and loads
+// the hook status so the result matches the TUI and /api/menu (issue #610),
+// updates the status, then reads the substate (the pass's pane capture, which
+// can settle the status under hook lag, session/hook_lag.go). Optional keys
+// are omitted when empty so existing consumers see byte-stable output.
+func sessionShowStatusFields(inst *session.Instance) map[string]interface{} {
+	session.RefreshInstancesForCLIStatus([]*session.Instance{inst})
+	_ = inst.UpdateStatus()
+	substate := string(inst.Substate())
+	fields := map[string]interface{}{"status": StatusString(inst.Status)}
+	if substate != "" {
+		fields["substate"] = substate
+	}
+	if detail := inst.SubstateDetail(); detail != "" {
+		fields["substate_detail"] = detail
+	}
+	if work := inst.BackgroundWorkJSON(); work != nil {
+		fields["background_work"] = work
+	}
+	return fields
+}
+
 // handleSessionShow shows session details
 func handleSessionShow(profile string, args []string) {
 	fs := flag.NewFlagSet("session show", flag.ExitOnError)
@@ -1876,13 +1900,7 @@ func handleSessionShow(profile string, args []string) {
 		}
 	}
 
-	// Warm tmux pane-title cache + load hook status so `session show --json`
-	// reports the same Status the TUI and /api/menu do (issue #610).
-	session.RefreshInstancesForCLIStatus([]*session.Instance{inst})
-	// Update status, then the substate read (the pass's pane capture, which
-	// can settle the status under hook lag — session/hook_lag.go).
-	_ = inst.UpdateStatus()
-	substate := string(inst.Substate())
+	statusFields := sessionShowStatusFields(inst)
 
 	// #2080: surface the raw hook-driven status and its freshness alongside
 	// the derived "status" field. `--defer-if-busy` and the send verification
@@ -1910,7 +1928,6 @@ func handleSessionShow(profile string, args []string) {
 		"id":                   inst.ID,
 		"title":                inst.Title,
 		"profile":              profile,
-		"status":               StatusString(inst.Status),
 		"path":                 inst.ProjectPath,
 		"group":                inst.GroupPath,
 		"order":                groupTree.SessionPosition(inst),
@@ -1928,13 +1945,8 @@ func handleSessionShow(profile string, args []string) {
 		"hook_status":       hookStatus,
 		"hook_status_fresh": hookStatusFresh,
 	}
-	// Honest Status v2: additive substate refinement (omit when none so the
-	// existing keys stay byte-stable for consumers that don't expect it).
-	if substate != "" {
-		jsonData["substate"] = substate
-	}
-	if detail := inst.SubstateDetail(); detail != "" {
-		jsonData["substate_detail"] = detail
+	for k, v := range statusFields {
+		jsonData[k] = v
 	}
 	modelInfo := inst.LaunchModelInfo()
 	addModelInfoJSON(jsonData, modelInfo)
@@ -3066,6 +3078,7 @@ func handleSessionSend(profile string, args []string) {
 	codexComposerFallback := fs.Bool("codex-composer-fallback", false, "Codex only: when the session's Codex identity is provably unavailable (fresh composer, rollout re-created after the trust prompt), send through the verified composer path instead of refusing. Never used for --json --wait; every other acceptance error still refuses")
 	queue := fs.Bool("queue", false, "Return at once with a send_id; a background worker delivers when the target is idle, at most once; every send ends landed, failed or settled with a reason (see session send-status)")
 	queueWorker := fs.Bool("queue-worker", false, "Internal: deliver a durable queued send directly")
+	noTag := fs.Bool("no-tag", false, "Do not prefix the [agent-deck from:<id>] envelope a send from inside a session gets by default ([send] tag_sends)")
 	var images imageList
 	fs.Var(&images, "image", "Attach an image (repeatable): Claude Code and Gemini get @<copy under .agentdeck-images/>; Codex and other harnesses exit 2")
 
@@ -3103,6 +3116,10 @@ func handleSessionSend(profile string, args []string) {
 		fmt.Println("  The send is watched until its text lands in")
 		fmt.Println("  the transcript (state landed, landed_row_id). Retry budget 30m, then failed with a reason.")
 		fmt.Println("  Exit 0 queued, 1 failed at once (e.g. target not running).")
+		fmt.Println("From inside an agent-deck session, a send to a Claude target starts with one")
+		fmt.Println("  [agent-deck from:<your session id>] line so the reply is routed back to you")
+		fmt.Println("  (urgent in your inbox). --no-tag or [send] tag_sends = false turns it off;")
+		fmt.Println("  slash commands, --draft and heartbeats are never tagged. --json reports tagged.")
 		fmt.Println("--image: Claude Code and Gemini receive @path; Codex takes images only at launch (-i), so a")
 		fmt.Println("  running Codex session exits 2, as does any other harness. Exit codes: 0 sent/queued,")
 		fmt.Println("  1 delivery failed, 2 usage error, unknown session or unsupported image.")
@@ -3187,6 +3204,17 @@ func handleSessionSend(profile string, args []string) {
 		}
 		telemetry.MessageSent(inst.Tool, via, messageChars, *queue)
 	}
+	// PR5 of the comms redesign: tag an agent-originated send with the
+	// sender's id. The queue worker delivers a message tagged when queued.
+	senderID := sendSenderID()
+	message, tagged := tagSendMessage(message, sendTagInputs{
+		senderID:   senderID,
+		senderTool: sendSenderTool(senderID, instances),
+		targetID:   inst.ID,
+		targetTool: inst.Tool,
+		enabled:    !*noTag && !*queueWorker && sendTagsEnabled(),
+		draft:      *draft,
+	})
 	if len(images) > 0 || *queue || asyncJSON {
 		if *queue && (*wait || *stream || *draft || *noWait || *deferIfBusy) {
 			out.Error("--queue is incompatible with --wait, --stream, --draft, --no-wait and --defer-if-busy", ErrCodeInvalidOperation)
@@ -3204,7 +3232,7 @@ func handleSessionSend(profile string, args []string) {
 				out.Error(err.Error(), ErrCodeInvalidOperation)
 				os.Exit(1)
 			}
-			queueSend(profile, storage, inst, message, copies, out) // exits on failure
+			queueSend(profile, storage, inst, message, copies, tagged, out) // exits on failure
 			recordSent()
 			return
 		}
@@ -3242,6 +3270,7 @@ func handleSessionSend(profile string, args []string) {
 			"session_id":    inst.ID,
 			"session_title": inst.Title,
 			"message":       message,
+			"tagged":        tagged,
 		})
 		return
 	}
@@ -3393,6 +3422,7 @@ func handleSessionSend(profile string, args []string) {
 			"session_id":    inst.ID,
 			"session_title": inst.Title,
 			"message":       message,
+			"tagged":        tagged,
 		})
 		return
 	}
@@ -3537,6 +3567,7 @@ func handleSessionSend(profile string, args []string) {
 	}
 
 	sendData := sendSuccessData(inst, message, sendRes, *wait)
+	sendData["tagged"] = tagged
 	if session.IsCodexCompatible(inst.Tool) {
 		sendData["accepted_turn_kind"] = "codex_rollout"
 	}
