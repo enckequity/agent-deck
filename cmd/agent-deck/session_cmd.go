@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/asheshgoplani/agent-deck/internal/clipboard"
+	"github.com/asheshgoplani/agent-deck/internal/comms"
 	"github.com/asheshgoplani/agent-deck/internal/git"
 	"github.com/asheshgoplani/agent-deck/internal/health"
 	"github.com/asheshgoplani/agent-deck/internal/jujutsu"
@@ -3063,7 +3064,7 @@ func handleSessionSend(profile string, args []string) {
 	fs := flag.NewFlagSet("session send", flag.ExitOnError)
 	fs.SetOutput(os.Stdout)
 	jsonOutput := fs.Bool("json", false, "Output as JSON")
-	quiet := fs.Bool("q", false, "Quiet mode")
+	quiet := fs.Bool("q", false, "Quiet mode: nothing on a confirmed delivery; one stderr line when delivery is unconfirmed or queued; errors as usual")
 	noWait := fs.Bool("no-wait", false, "Don't wait for agent to be ready (send immediately)")
 	wait := fs.Bool("wait", false, "Block until agent finishes processing, then print output (on a socket send, first waits up to 30s for the turn to start; returns immediately with wait_outcome=unverified_busy_target/unverified_busy_probe_failed if the target could not be shown idle)")
 	stream := fs.Bool("stream", false, "Stream JSONL events (Claude only) to stdout instead of returning a snapshot")
@@ -3114,7 +3115,9 @@ func handleSessionSend(profile string, args []string) {
 		fmt.Println("  send_id with verdict queued. Claude accepts input while busy; other harnesses wait")
 		fmt.Println("  for idle. send-status and delivery events upgrade the verdict when evidence arrives.")
 		fmt.Println("  The send is watched until its text lands in")
-		fmt.Println("  the transcript (state landed, landed_row_id). Retry budget 30m, then failed with a reason.")
+		fmt.Println("  the transcript (state landed, landed_row_id). A refusal before typing (composer_blocked,")
+		fmt.Println("  target_busy) is retried with a doubling wait capped at 1m; after the 30m budget the send")
+		fmt.Println("  fails with a reason, and a sender session gets the failure in its inbox.")
 		fmt.Println("  Exit 0 queued, 1 failed at once (e.g. target not running).")
 		fmt.Println("From inside an agent-deck session, a send to a Claude target starts with one")
 		fmt.Println("  [agent-deck from:<your session id>] line so the reply is routed back to you")
@@ -3232,7 +3235,11 @@ func handleSessionSend(profile string, args []string) {
 				out.Error(err.Error(), ErrCodeInvalidOperation)
 				os.Exit(1)
 			}
-			queueSend(profile, storage, inst, message, copies, tagged, out) // exits on failure
+			ledgerSender := senderID
+			if *noTag {
+				ledgerSender = "" // --no-tag: never attributed to an inherited session
+			}
+			queueSend(profile, storage, inst, message, copies, tagged, ledgerSender, out) // exits on failure
 			recordSent()
 			return
 		}
@@ -3486,11 +3493,30 @@ func handleSessionSend(profile string, args []string) {
 	// on, so it needs the same lookup closure. performSend only calls it
 	// under --wait, which is the only caller that acts on the answer.
 	hookStatus := func() (string, error) { return fetchHookDrivenStatus(profile, sessionRef) }
+	// Comms Ledger (P3): the send's receipt is recorded before the action,
+	// its transport outcome after. A queued send is recorded by the queue
+	// (queueSend, publishSendState), so its worker does not record it twice,
+	// and a machine wake line (a nudge typed by the daemon) is a wake record,
+	// never a send.
+	ledgerReq, ledgerSender := "", ""
+	if !*queueWorker && ledgerSendAllowed() {
+		// --no-tag: the caller opted out of being the sender (a web or
+		// script send that only inherited a session's environment): recorded
+		// as from a person at a shell, never attributed to that session.
+		ledgerSender = senderID
+		if *noTag {
+			ledgerSender = ""
+		}
+		ledgerReq = session.SpoolCommsSend(ledgerSender, inst.ID, message, ledgerSendVia(inst), "")
+	}
 	sendRes, sendErr := performSend(inst, tmuxSess, message, *noWait || busyAcceptsInput, tun, sendTransportValue, *wait, hookStatus, nil, nil)
+	if ledgerReq != "" {
+		session.SpoolCommsDelivery(ledgerSender, inst.ID, ledgerReq, ledgerDeliveryState(sendRes.delivery, sendErr), sendRes.transport, ledgerDeliveryReason(sendErr), false)
+	}
 	// Computed now (accurate ack_ms), journaled after the verdict at every
 	// exit path below — never before it, per the same rule applied to
 	// handleSessionStop/handleSessionRestart.
-	sendDetail := sendEventDetail(sendRes, sendErr, sentAt)
+	sendDetail := sendEventDetail(sendRes, sendErr, sentAt, sendJournalMetaFor(profile, storage, *queueWorker, message))
 	if acceptanceGuard != nil {
 		if markerErr := acceptanceGuard.RecordTransportOutcome(sendRes.delivery, time.Now()); markerErr != nil {
 			acceptanceGuard.Release()
@@ -3648,6 +3674,9 @@ func handleSessionSend(profile string, args []string) {
 				summary = fmt.Sprintf("Wrote message to '%s' inbox (unacknowledged: Claude's inbox never confirms delivery)", inst.Title)
 			}
 			out.Success(summary, sendData)
+			if journalSendOutcome(sendRes.delivery, nil) != health.SendConfirmed {
+				out.QuietNotice(summary)
+			}
 			recordSendEventOnce()
 		}
 	}
@@ -6228,6 +6257,10 @@ func handleSessionOutput(profile string, args []string) {
 	paneFlag := fs.Bool("pane", false, "Return tmux capture-pane content (ANSI stripped in default text mode)")
 	primaryPane := fs.Bool("primary", false, "With --pane, capture the managed first window")
 	maxTokens := fs.Int("max-tokens", defaultOutputMaxTokens, "Maximum default text-output budget in approximate tokens (head+tail; full text retained on disk)")
+	// #2481: conditional read for pollers. With the content_version of an
+	// earlier --json read, an unchanged transcript answers {"unchanged":true}
+	// from one stat: no transcript parse, no content, no read-log entry.
+	ifVersion := fs.String("if-version", "", "With --json: answer {\"unchanged\":true} without content when the response source still has this content_version")
 
 	fs.Usage = func() {
 		fmt.Println("Usage: agent-deck session output [id|title] [options]")
@@ -6242,6 +6275,10 @@ func handleSessionOutput(profile string, args []string) {
 			"around an explicit \"output omitted\" seam and ends with the path of the full output retained on\n"+
 			"disk. --json, -q/--quiet and --copy always carry the complete, unstripped source.\n",
 			defaultOutputMaxTokens, outputBytesPerToken)
+		fmt.Println()
+		fmt.Println("Change detection: --json carries content_version when the response is parsed from one\n" +
+			"transcript file. Pass it back with --if-version to get {\"unchanged\":true} (no content, not a\n" +
+			"logged read) while that file is unchanged; any change returns the full response and a new version.")
 	}
 
 	if err := fs.Parse(normalizeArgs(fs, args)); err != nil {
@@ -6258,6 +6295,10 @@ func handleSessionOutput(profile string, args []string) {
 	out := NewCLIOutput(*jsonOutput, quietMode)
 	if *primaryPane && !*paneFlag {
 		out.Error("--primary requires --pane", ErrCodeInvalidOperation)
+		os.Exit(1)
+	}
+	if *ifVersion != "" && (!*jsonOutput || quietMode || *paneFlag || *copyFlag) {
+		out.Error("--if-version requires --json and cannot be combined with -q, --pane or --copy", ErrCodeInvalidOperation)
 		os.Exit(1)
 	}
 
@@ -6280,6 +6321,11 @@ func handleSessionOutput(profile string, args []string) {
 		}
 		os.Exit(1)
 		return // unreachable, satisfies staticcheck SA5011
+	}
+	// Comms Ledger measurement: a session re-reading another one is the
+	// call a ledger-fed parent should not need (#2482 target).
+	if caller := callerSessionID(); caller != "" && caller != inst.ID {
+		session.SpoolCommsCall(caller, comms.CallSessionOutput, inst.ID)
 	}
 
 	// Refresh session ID from tmux env before reading output.
@@ -6336,8 +6382,21 @@ func handleSessionOutput(profile string, args []string) {
 	// claude_session_id resolve to the SAME transcript, so the parsed "last
 	// response" (-q / --json / default / --copy) would be byte-identical for
 	// all of them. Refuse the read instead — the same guard `session output
-	// --stream` got in #1352.
-	response, err := inst.GetLastResponseBestEffortChecked(instances)
+	// --stream` got in #1352. A colliding transcript has no content version,
+	// so the #2481 stat-only shortcut below never bypasses that guard.
+	version := inst.ResponseContentVersion(instances)
+	if version != "" && version == *ifVersion {
+		out.Print("unchanged", map[string]interface{}{
+			"success":         true,
+			"session_id":      inst.ID,
+			"session_title":   inst.Title,
+			"tool":            inst.Tool,
+			"unchanged":       true,
+			"content_version": version,
+		})
+		return
+	}
+	response, versioned, err := inst.GetLastResponseAtVersion(instances, version)
 	if err != nil {
 		out.Error(fmt.Sprintf("failed to get response: %v", err), ErrCodeInvalidOperation)
 		os.Exit(1)
@@ -6386,6 +6445,9 @@ func handleSessionOutput(profile string, args []string) {
 	}
 	if response.CodexTurnGeneration != "" {
 		jsonData["codex_turn_generation"] = response.CodexTurnGeneration
+	}
+	if versioned {
+		jsonData["content_version"] = version
 	}
 	// Add tool-specific conversation session ID
 	if response.SessionID != "" {

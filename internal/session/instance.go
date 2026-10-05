@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log/slog"
 	"maps"
@@ -6527,11 +6528,13 @@ func (i *Instance) updateStatus(pass *StatusUpdatePass, syncMetadata bool) error
 				// dialog dismissed with Esc fires no further hook and the stale
 				// event must not hold a running workflow at waiting.
 				var work tmux.BackgroundWork
+				var foregroundBusy bool
 				if i.tmuxSession != nil && IsClaudeCompatible(i.Tool) &&
 					!blockingHookInGrace(i.hookEvent, i.hookLastUpdate, time.Now()) {
 					hookAt := i.hookLastUpdate
 					i.mu.Unlock()
-					if pane, blocked := i.tmuxSession.BackgroundWorkSince(hookAt); !blocked {
+					if pane, blocked, busy := i.tmuxSession.BackgroundWorkSince(hookAt); !blocked {
+						foregroundBusy = busy
 						work = i.probeBackgroundWork(pane)
 					}
 					i.mu.Lock()
@@ -6540,6 +6543,11 @@ func (i *Instance) updateStatus(pass *StatusUpdatePass, syncMetadata bool) error
 					}
 				}
 				switch {
+				case foregroundBusy:
+					// Stop can arrive before Claude removes its live spinner.
+					// A fresh waiting hook cannot override that frame (#2502).
+					i.Status = StatusRunning
+					i.tmuxSession.ResetAcknowledged()
 				case work.InFlight():
 					i.Status = StatusRunning
 					i.bgWorkActive = true
@@ -8344,6 +8352,67 @@ func (i *Instance) GetLastResponseBestEffortChecked(peers []*Instance) (*Respons
 	return i.GetLastResponseBestEffort()
 }
 
+// responseVersionedFile is the one file the primary last-response read parses
+// (the bound Claude transcript or the exact Codex rollout), or "" when the
+// response would come from somewhere unversioned (pane text, a disk-scan
+// recovery, another tool) or when peers share the Claude transcript (#1400).
+func (i *Instance) responseVersionedFile(peers []*Instance) string {
+	switch {
+	case IsCodexCompatible(i.Tool):
+		path, err := i.codexRolloutPath()
+		if err != nil {
+			return ""
+		}
+		return path
+	case IsClaudeCompatible(i.Tool):
+		path, err := i.GetJSONLPathChecked(peers)
+		if err != nil {
+			return ""
+		}
+		return path
+	}
+	return ""
+}
+
+// ResponseContentVersion returns an opaque version of the file the last
+// response is parsed from (path, size and modification time), or "" when the
+// response is not backed by one versioned file. Equal versions mean the
+// parsed last response cannot have changed, so a poller can skip the read
+// (issue #2481). It costs one stat, never a parse.
+func (i *Instance) ResponseContentVersion(peers []*Instance) string {
+	path := i.responseVersionedFile(peers)
+	if path == "" {
+		return ""
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(path))
+	return fmt.Sprintf("v1-%x-%x-%x", h.Sum64(), info.Size(), info.ModTime().UnixNano())
+}
+
+// GetLastResponseAtVersion is GetLastResponseBestEffortChecked for a caller
+// that took version from ResponseContentVersion just before. It reports true
+// when the response was parsed from that versioned file, so the version may
+// be handed out with it; a fallback response reports false. The version is
+// taken before the read, so a write racing the read can only make the next
+// comparison miss (one extra read), never hide a change.
+func (i *Instance) GetLastResponseAtVersion(peers []*Instance, version string) (*ResponseOutput, bool, error) {
+	if version != "" {
+		read := i.getClaudeLastResponse
+		if IsCodexCompatible(i.Tool) {
+			read = i.getCodexLastResponse
+		}
+		if resp, err := read(); err == nil {
+			return resp, true, nil
+		}
+	}
+	resp, err := i.GetLastResponseBestEffortChecked(peers)
+	return resp, false, err
+}
+
 // GetLastResponseBestEffort returns the last assistant response with fallback logic
 // intended for CLI read paths (like `session output`) where we prefer useful output
 // over hard errors.
@@ -8738,32 +8807,27 @@ func (i *Instance) GetJSONLPathChecked(peers []*Instance) (string, error) {
 // D:\proj -> D--proj). The two encodings never match, so the computed path misses
 // and analytics / last-response silently break. The session ID is a UUID, so
 // matching on the filename is unambiguous.
-func resolveClaudeTranscriptPath(configDir, projectPath, sessionID string) string {
+func resolveClaudeTranscriptPath(configDir, projectPath, sessionID string, additionalPaths ...string) string {
 	if sessionID == "" {
 		return ""
 	}
 
-	// Resolve symlinks in project path (macOS: /tmp -> /private/tmp).
-	resolvedPath := projectPath
-	if resolved, err := filepath.EvalSymlinks(projectPath); err == nil {
-		resolvedPath = resolved
-	}
-
 	projectsDir := filepath.Join(configDir, "projects")
 
-	// Primary: the directory name Claude derives from the project path. Claude
-	// replaces every non-alphanumeric char with a hyphen.
-	//
-	// Both encodings of the project path are tried as EXACT candidates, resolved
-	// first: Claude names the directory from getcwd() (the physical path), but a
-	// transcript recorded through a symlinked path — or copied from another host
-	// — can carry the unresolved form. Checking the second candidate here keeps
-	// the resolution deterministic and, more importantly, keeps it OUT of the
-	// glob fallback below, which cannot tell two projects apart when they share
-	// a session id (issue #1720).
-	candidateDirs := []string{resolvedPath}
-	if projectPath != resolvedPath {
-		candidateDirs = append(candidateDirs, projectPath)
+	// Try ProjectPath first, then other known working directories (multi-repo
+	// sessions launch in EffectiveWorkingDir). All exact candidates precede the
+	// glob so a cached miss cannot delay a new transcript at a known location.
+	// Resolve symlinks first, but retain the original encoding for copied
+	// transcripts and to keep same-ID projects distinct (issue #1720).
+	var candidateDirs []string
+	for index, path := range append([]string{projectPath}, additionalPaths...) {
+		if path == "" || (index > 0 && path == projectPath) {
+			continue
+		}
+		if resolved, err := filepath.EvalSymlinks(path); err == nil && resolved != path {
+			candidateDirs = append(candidateDirs, resolved)
+		}
+		candidateDirs = append(candidateDirs, path)
 	}
 	for _, candidateDir := range candidateDirs {
 		if candidateDir == "" {
@@ -8778,11 +8842,69 @@ func resolveClaudeTranscriptPath(configDir, projectPath, sessionID string) strin
 	// Fallback: the transcript may live under a differently-encoded directory name
 	// (notably WSL Linux path vs. Windows/UNC cwd). Locate it by its unique
 	// session-id filename. A UUID contains no glob metacharacters.
-	if matches, err := filepath.Glob(filepath.Join(projectsDir, "*", sessionID+".jsonl")); err == nil && len(matches) > 0 {
-		return matches[0]
+	return globClaudeTranscript(projectsDir, sessionID)
+}
+
+// transcriptGlob is filepath.Glob; tests count its calls.
+var transcriptGlob = filepath.Glob
+
+// transcriptGlobMissTTL bounds how long a glob that found nothing is reused.
+// The glob lists every project directory (hundreds on a real host) and stats
+// each one; the notify-daemon resolved the same missing transcript several
+// times per pass, every second, which was most of its CPU (issue #2481).
+const transcriptGlobMissTTL = 10 * time.Second
+
+type transcriptGlobEntry struct {
+	path    string
+	checked time.Time
+}
+
+var (
+	transcriptGlobMu    sync.Mutex
+	transcriptGlobCache = map[string]transcriptGlobEntry{}
+)
+
+// globClaudeTranscript is the glob fallback of resolveClaudeTranscriptPath,
+// memoized: a found path is reused while it still exists, a miss for
+// transcriptGlobMissTTL. The exact-path checks above run on every call, so a
+// transcript at its normal location is never delayed by a cached miss. A new
+// transcript under a non-exact encoding (notably WSL) may take up to 10 s to
+// discover. The key includes the config directory and session ID, so restarting
+// with a new ID cannot reuse the previous transcript. Concurrent cold lookups
+// may duplicate a glob; filesystem I/O stays outside the cache mutex.
+func globClaudeTranscript(projectsDir, sessionID string) string {
+	key := projectsDir + "\x00" + sessionID
+	now := time.Now()
+	transcriptGlobMu.Lock()
+	entry, ok := transcriptGlobCache[key]
+	transcriptGlobMu.Unlock()
+	if ok {
+		if entry.path != "" {
+			if _, err := os.Stat(entry.path); err == nil {
+				return entry.path
+			}
+		} else if now.Sub(entry.checked) < transcriptGlobMissTTL {
+			return ""
+		}
 	}
 
-	return ""
+	found := ""
+	if matches, err := transcriptGlob(filepath.Join(projectsDir, "*", sessionID+".jsonl")); err == nil && len(matches) > 0 {
+		found = matches[0]
+	}
+	transcriptGlobMu.Lock()
+	// A lookup may finish after another caller has cached a hit. Preserve that
+	// hit, while still allowing a missing file to invalidate the entry we read.
+	if latest := transcriptGlobCache[key]; found == "" && latest.path != "" && latest != entry {
+		transcriptGlobMu.Unlock()
+		return ""
+	}
+	if len(transcriptGlobCache) >= 4096 {
+		clear(transcriptGlobCache) // bound: one entry per session id resolved
+	}
+	transcriptGlobCache[key] = transcriptGlobEntry{path: found, checked: now}
+	transcriptGlobMu.Unlock()
+	return found
 }
 
 // GetJSONLPath returns the path to the Claude session JSONL file for analytics.
@@ -8800,21 +8922,22 @@ func (i *Instance) GetJSONLPath() string {
 	if !i.TranscriptIsResolvableLocally() {
 		return ""
 	}
-	return resolveClaudeTranscriptPath(GetClaudeConfigDir(), i.ProjectPath, i.ClaudeSessionID)
+	return resolveClaudeTranscriptPath(GetClaudeConfigDir(), i.ProjectPath, i.ClaudeSessionID, i.EffectiveWorkingDir())
 }
 
 // ResolveClaudeTranscriptPath returns the path to the Claude JSONL transcript
 // for a session id under a specific config dir, or "" when none exists.
+// Optional additional working directories are exact candidates before the glob.
 //
 // It is exported for callers that must resolve a transcript against a
 // PER-INSTANCE config dir. GetJSONLPath resolves against the process-wide
 // GetClaudeConfigDir(), which agent-deck's account/conductor/group scoping and
 // per-session scratch homes make frequently wrong for a given instance.
-func ResolveClaudeTranscriptPath(configDir, projectPath, sessionID string) string {
+func ResolveClaudeTranscriptPath(configDir, projectPath, sessionID string, additionalPaths ...string) string {
 	if configDir == "" || sessionID == "" {
 		return ""
 	}
-	return resolveClaudeTranscriptPath(configDir, projectPath, sessionID)
+	return resolveClaudeTranscriptPath(configDir, projectPath, sessionID, additionalPaths...)
 }
 
 // getClaudeLastResponse extracts the last assistant message from Claude's JSONL file
@@ -8830,7 +8953,7 @@ func (i *Instance) getClaudeLastResponse() (*ResponseOutput, error) {
 		return nil, fmt.Errorf("instance %s runs on %s; its Claude transcript is not on this machine", i.ID, i.SSHHost)
 	}
 
-	sessionFile := resolveClaudeTranscriptPath(GetClaudeConfigDir(), i.ProjectPath, i.ClaudeSessionID)
+	sessionFile := resolveClaudeTranscriptPath(GetClaudeConfigDir(), i.ProjectPath, i.ClaudeSessionID, i.EffectiveWorkingDir())
 	if sessionFile == "" {
 		return nil, fmt.Errorf("session file not found for claude_session_id %s", i.ClaudeSessionID)
 	}
@@ -11514,7 +11637,18 @@ func (i *Instance) Substate() Substate {
 	if tmuxSess == nil {
 		return SubstateNone
 	}
-	sub := tmuxSess.GetSubstate()
+	sub, liveSpinner := tmuxSess.GetSubstateWithLiveSpinner()
+	// The substate capture can be newer than the waiting-hook probe. Use its
+	// narrow current-composer cue, never generic running text in scrollback.
+	if sub == SubstateRunning && liveSpinner {
+		i.mu.Lock()
+		if IsClaudeCompatible(i.Tool) && (i.Status == StatusWaiting || i.Status == StatusIdle) &&
+			!blockingHookInGrace(i.hookEvent, i.hookLastUpdate, time.Now()) {
+			i.Status = StatusRunning
+			tmuxSess.ResetAcknowledged()
+		}
+		i.mu.Unlock()
+	}
 	// The frame just read is hook-lag evidence too (see hook_lag.go); feed it
 	// back so status and substate describe the same frame.
 	i.absorbCompletedTurnSample()

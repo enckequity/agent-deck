@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -74,6 +73,17 @@ type TransitionDaemon struct {
 	// happened to observe the session mid-`running`: see recordTerminalTurns.
 	lastTurn map[string]map[string]string
 
+	// journaledRun maps (profile, child) to the turn uuid emitTurn journaled
+	// for it since this daemon last saw the child running (issue #2481). The
+	// snapshot edge that follows a hook-path record of the same run is that
+	// same turn, not a stale-signal turn, so it must not be forced urgent and
+	// journaled again. nil-safe; see forgetJournaledTurnsOfRunning.
+	journaledRun map[string]map[string]string
+	// lastSelfTurn is the last turn emitTurn skipped per top-level conductor
+	// (issue #2481). Those turns are not journaled, so this is what tells a
+	// re-observation of the same turn from a new one.
+	lastSelfTurn map[string]TurnJournalEntry
+
 	// turnLiveCheck decides whether an instance is a live session or a stale
 	// registry row. A seam because the real check probes tmux, which a unit test
 	// cannot and should not do — and testing this logic is the whole point after a
@@ -132,6 +142,7 @@ type TransitionDaemon struct {
 	ledgerOpenFailed map[string]time.Time
 	commsPrompts     map[string]CommsSpoolEntry
 	lastCommsPrune   time.Time
+	lastImportPrune  map[string]time.Time // per profile
 
 	// journalWriters holds the per-profile writer for the session event
 	// journal, resolved once per profile for the daemon's lifetime and nil
@@ -442,13 +453,8 @@ func (d *TransitionDaemon) logProbeStall(profile, instanceID, reason string) {
 	if err != nil {
 		return
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
-	_, _ = f.Write(append(line, '\n'))
-	if err := f.Close(); err != nil {
-		fmt.Fprintf(os.Stderr, "logProbeStall: close %s: %v\n", path, err)
+	if err := appendRotatingLogLine(path, line, transitionLogRotation); err != nil {
+		commsLog.Debug("probe_stall_log_write_failed", slog.String("path", path), slog.String("error", err.Error()))
 	}
 }
 
@@ -616,6 +622,10 @@ func (d *TransitionDaemon) syncProfile(profile string) time.Duration {
 	// extra capture, no new goroutine (F3). Disabled-by-config → cheap no-op.
 	d.runSelfHealObservePass(profile, instances, statuses, hookStatuses, db, time.Now().UTC())
 
+	// Issue #2481: a child seen running starts a new run, so the next observed
+	// flip is a new turn unless a path journals one for it first.
+	d.forgetJournaledTurnsOfRunning(profile, statuses)
+
 	// A daemon PROCESS start (first pass for the profile) seeds the turn
 	// baseline from the registry against the persisted last-notified state, so
 	// a recycle does not republish every parked child. See seedTurnBaseline.
@@ -628,6 +638,9 @@ func (d *TransitionDaemon) syncProfile(profile string) time.Duration {
 	// Comms Ledger: a second, independent store fed from the producers'
 	// spool. Runs after the inbox path so nothing above changes.
 	d.ingestCommsSpool(profile, byID)
+	// Delivery canary ([comms] consumers): the ledger, not the inbox,
+	// wakes and feeds the listed parents.
+	d.deliverCommsLedger(profile, byID, statuses)
 	d.journalStatusChanges(profile, byID, statuses, substates)
 	if cfg, _ := LoadUserConfig(); cfg != nil && cfg.Macapp.TranscriptEvents {
 		transcriptGrowth.publish(profile, instances)
@@ -1017,6 +1030,24 @@ func (d *TransitionDaemon) emitDoneSignals(profile string, byID map[string]*Inst
 		if !notifyEnabled || !instanceAcceptsTransitionEvents(inst) {
 			continue
 		}
+		// Issue #2481: after a daemon restart (or for a tool without a
+		// transcript) the durable ledger still recognises a repeat. This
+		// path has no trigger, so it treats the turn as background; for a
+		// child with a readable transcript emitTurn owns the decision (it
+		// knows who started the turn), so a repeat here is held back without
+		// being counted and emitTurn delivers or counts it.
+		at := hs.UpdatedAt
+		if at.IsZero() {
+			at = time.Now()
+		}
+		_, emitTurnOwns := instanceTurnFacts(inst)
+		if repeat, counted := checkDoneRepeat(id, profile, sig, "", true, !emitTurnOwns, at); repeat {
+			if counted {
+				_ = BumpInboxStats(statsParentFor(inst), func(s *InboxStats) { s.DoneRepeats++ })
+			}
+			d.rememberDone(profile, id, sig)
+			continue
+		}
 
 		event := TransitionNotificationEvent{
 			ChildSessionID: id,
@@ -1027,11 +1058,7 @@ func (d *TransitionDaemon) emitDoneSignals(profile string, byID map[string]*Inst
 			Timestamp:      hs.UpdatedAt,
 		}
 		_ = d.notifier.NotifyFinished(event)
-
-		if d.lastDone[profile] == nil {
-			d.lastDone[profile] = map[string]DoneSignal{}
-		}
-		d.lastDone[profile][id] = sig
+		d.rememberDone(profile, id, sig)
 
 		// Record the completion to the non-destructive ledger so a parent can
 		// query `session children` without consuming the delivery event.

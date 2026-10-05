@@ -337,6 +337,13 @@ type CommsSettings struct {
 	// spool file is written and no ledger directory is created. The old
 	// inbox, turn journal and inbox stats keep working either way.
 	Ledger bool `toml:"ledger,omitempty"`
+	// Consumers enrolls Claude parents by id, unique title, or "*". The
+	// inbox is unchanged; the ledger adds prompt text and deduplicates exact
+	// transcript turns in both directions. Ledger wakes and Stop blocks are
+	// only for ledger-only urgent records, which have no production producer
+	// in P2b, so this phase does not move the #2482 wake targets.
+	// Needs ledger = true. See docs/comms.md "Delivery".
+	Consumers []string `toml:"consumers,omitempty"`
 }
 
 // MacappSettings is the [macapp] section. Everything is off by default.
@@ -1049,6 +1056,9 @@ type FeedbackSettings struct {
 
 // TelemetrySettings configures opt-in usage telemetry (TELEMETRY.md).
 type TelemetrySettings struct {
+	// Owner suppresses only the anonymous daily install tick. It cannot grant consent.
+	Owner bool `toml:"owner,omitempty"`
+
 	// Disabled forces telemetry off regardless of stored consent, like
 	// AGENTDECK_TELEMETRY=0. It cannot enable telemetry.
 	Disabled bool `toml:"disabled,omitempty"`
@@ -3891,7 +3901,7 @@ type DisplaySettings struct {
 	// DefaultFilter sets the initial status filter when the TUI opens.
 	// Valid values: "" (all, default), "active" (hides error/stopped),
 	// "running", "waiting", "idle", "error".
-	// If set to "active" and no non-error sessions exist, falls back to showing all.
+	// The active filter remains selected even when no sessions match.
 	DefaultFilter string `toml:"default_filter,omitempty"`
 
 	// ActiveFilterLabel sets the label shown on the filter pill when the active

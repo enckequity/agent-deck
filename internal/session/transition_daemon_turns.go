@@ -31,6 +31,10 @@ import (
 // notifier then flags it OutputHashStale as before. Hook re-fires and
 // recorded-turn re-scans observe no flip and are subject to the noise rule.
 //
+// An observed flip of a turn this daemon already journaled during the same
+// run (the hook or recorded-turn path saw it first) is that turn again, not a
+// stale signal, so it stays noise (issue #2481).
+//
 // The returned bool is false for a pending turn and for a transiently failed
 // commit; in both cases the caller leaves its bookkeeping untouched so the
 // next poll retries.
@@ -61,15 +65,30 @@ func (d *TransitionDaemon) emitTurn(profile string, inst *Instance, byID map[str
 	}
 	event.LastOutputHash = transitionEventOutputHash(inst)
 	statsParent := statsParentFor(inst)
+	selfConductor := isSelfSuppressedConductor(inst)
 
 	if !classified {
+		if selfConductor {
+			// Issue #2481: no transcript, so no sender to answer; the notifier
+			// would drop it as self_conductor after a registry load.
+			d.commsStatusEdge(inst, from, to, event.Timestamp)
+			return dropSelfConductorTurn(event, true), true
+		}
 		// Legacy signal, no text: emit as before. The notifier's dedup is the
 		// only improvement available without a transcript.
-		_ = BumpInboxStats(statsParent, func(s *InboxStats) { s.RecordsLegacy++ })
 		result := d.notifier.NotifyTransition(event)
+		if result.DeliveryResult == transitionDeliveryCommitted {
+			_ = BumpInboxStats(statsParent, func(s *InboxStats) { s.RecordsLegacy++ })
+		}
 		// Comms Ledger: the same edge, spooled after the inbox record so a
 		// ledger problem can never delay or lose the parent's wake.
 		d.commsStatusEdge(inst, from, to, event.Timestamp)
+		if IsClaudeCompatible(inst.Tool) && strings.TrimSpace(inst.ParentSessionID) != "" {
+			// A Claude turn with no identity (interrupted, no text) reaches
+			// the inbox only; the ledger gets the same edge so a parent it
+			// delivers to misses nothing the inbox would have shown.
+			d.commsInboxOnlyEdge(inst, from, to, event.Timestamp)
+		}
 		return result, true
 	}
 
@@ -83,14 +102,40 @@ func (d *TransitionDaemon) emitTurn(profile string, inst *Instance, byID map[str
 		}
 	}
 
+	// Issue #2481: a top-level conductor's own turn reaches no inbox; only a
+	// turn that answers a tagged send (its reply goes to the asker) or carries
+	// a completion sentinel (the completion ledger) needs the rest of the
+	// path. Drop the others before tiering, journaling, stats and the
+	// notifier's registry load: they were 42% of all transition frames.
+	if selfConductor && !facts.HasDone &&
+		!eventAnswersSend(TransitionNotificationEvent{FromID: facts.FromID, Trigger: facts.Trigger}) {
+		// One bus frame per turn, as the noise rule gave before: a repeat
+		// sighting publishes only when the child was seen to run again.
+		seen := TurnJournalEntry{UUID: facts.UUID, TextHash: facts.TextHash, Status: to}
+		repeat := d.lastSelfTurn[inst.ID] == seen
+		if d.lastSelfTurn == nil {
+			d.lastSelfTurn = map[string]TurnJournalEntry{}
+		}
+		d.lastSelfTurn[inst.ID] = seen
+		return dropSelfConductorTurn(event, observedFlip || !repeat), true
+	}
+
 	cfg := ResolveInboxConfig(parentTitleFor(inst, byID))
 	if !cfg.GetQuestionWakes() {
 		facts.Question = false
 	}
 	prev := LastTurnJournalEntry(inst.ID)
-	tier := ClassifyTurnTier(facts, to, prev)
-	if tier == TurnTierNoise && observedFlip {
+	classPrev := prev
+	if last, ok := d.lastSelfTurn[inst.ID]; ok && prev == nil {
+		// A conductor reparented after its last (skipped, unjournaled) turn:
+		// a re-observation of that turn is not news for the new parent.
+		classPrev = &last
+	}
+	tier := ClassifyTurnTier(facts, to, classPrev)
+	staleFlip := false
+	if tier == TurnTierNoise && observedFlip && !d.journaledThisRun(profile, inst.ID, facts.UUID) {
 		tier = TurnTierUrgent // a real turn the transcript cannot distinguish; never silent
+		staleFlip = true
 	}
 	if tier == TurnTierNoise {
 		_ = BumpInboxStats(statsParent, func(s *InboxStats) {
@@ -102,6 +147,22 @@ func (d *TransitionDaemon) emitTurn(profile string, inst *Instance, byID map[str
 		})
 		event.DeliveryResult = transitionDeliveryDropped
 		return event, true
+	}
+	// Issue #2481: an identical completion re-printed by a finished worker's
+	// leftover scheduled check is counted on the ledger, not delivered.
+	if facts.HasDone {
+		if repeat, counted := checkDoneRepeat(inst.ID, profile, facts.Done, facts.UUID, doneRepeatBackground(facts), true, event.Timestamp); repeat {
+			_ = BumpInboxStats(statsParent, func(s *InboxStats) {
+				if counted {
+					s.DoneRepeats++
+				} else {
+					s.DedupSuppressed++
+				}
+			})
+			d.rememberDone(profile, inst.ID, facts.Done)
+			event.DeliveryResult = transitionDeliveryDropped
+			return event, true
+		}
 	}
 
 	text := CapTurnText(facts.Text, cfg.GetMaxTextBytes())
@@ -165,33 +226,90 @@ func (d *TransitionDaemon) emitTurn(profile string, inst *Instance, byID map[str
 			clearHeldSend(inst.ID)
 		}
 	}
-	if _, err := AppendTurnJournal(entry, cfg.GetJournalKeep()); err != nil {
+	if _, err := UpsertTurnJournal(entry, cfg.GetJournalKeep()); err != nil {
 		commsLog.Warn("turn_journal_append_failed",
 			slog.String("child", inst.ID), slog.String("error", err.Error()))
 	}
-	_ = BumpInboxStats(statsParent, func(s *InboxStats) {
-		if tier == TurnTierUrgent {
-			s.RecordsUrgent++
-		} else {
-			s.RecordsInfo++
-		}
-		s.TextBytes += int64(len(text))
-	})
+	d.noteJournaledTurn(profile, inst.ID, facts.UUID)
+	// Counters count records that landed, not observations: a turn the
+	// notifier dropped (a duplicate, a dead letter) is journaled but is not a
+	// record.
+	if result.DeliveryResult == transitionDeliveryCommitted {
+		_ = BumpInboxStats(statsParent, func(s *InboxStats) {
+			if tier == TurnTierUrgent {
+				s.RecordsUrgent++
+			} else {
+				s.RecordsInfo++
+			}
+			s.TextBytes += int64(len(text))
+		})
+	}
 	if facts.HasDone {
-		d.noteDoneEmitted(profile, inst, facts.Done, event.Timestamp)
+		d.noteDoneEmitted(profile, inst, facts.Done, facts.UUID, event.Timestamp)
+	}
+	if (staleFlip || to == string(StatusError)) && strings.TrimSpace(inst.ParentSessionID) != "" {
+		// Urgent only to the inbox (its own inputs: a flip into the error
+		// status, an observed flip with a stale transcript): the ledger,
+		// whose spooled turn cannot see either, gets the edge as a status
+		// record after the inbox record is committed.
+		d.commsInboxOnlyEdge(inst, from, to, event.Timestamp)
 	}
 	return result, true
 }
+
+// journaledThisRun reports whether emitTurn journaled turn uuid for the
+// child since the daemon last saw the child running.
+func (d *TransitionDaemon) journaledThisRun(profile, childID, uuid string) bool {
+	return uuid != "" && d.journaledRun[profile][childID] == uuid
+}
+
+// noteJournaledTurn remembers the turn uuid just journaled for the child.
+func (d *TransitionDaemon) noteJournaledTurn(profile, childID, uuid string) {
+	if uuid == "" {
+		return
+	}
+	if d.journaledRun == nil {
+		d.journaledRun = map[string]map[string]string{}
+	}
+	if d.journaledRun[profile] == nil {
+		d.journaledRun[profile] = map[string]string{}
+	}
+	d.journaledRun[profile][childID] = uuid
+}
+
+// forgetJournaledTurnsOfRunning starts a new run for every child the pass
+// sees running, and drops children that left the profile.
+func (d *TransitionDaemon) forgetJournaledTurnsOfRunning(profile string, statuses map[string]string) {
+	run := d.journaledRun[profile]
+	for id := range run {
+		if st, ok := statuses[id]; !ok || normalizeStatusString(st) == string(StatusRunning) {
+			delete(run, id)
+		}
+	}
+}
+
+// dropSelfConductorTurn is the result the notifier would have produced for a
+// top-level conductor's own turn. The bus frame (when publish) is kept so
+// event consumers still see the edge; nothing else is written.
+func dropSelfConductorTurn(event TransitionNotificationEvent, publish bool) TransitionNotificationEvent {
+	event.DeliveryResult = transitionDeliveryDropped
+	event.DeadLetterReason = deadLetterReasonSelfConductor
+	if publish {
+		publishSelfTurnFrame("session.transition", event)
+	}
+	return event
+}
+
+// publishSelfTurnFrame is publishTransitionEvent; tests count its calls (the
+// process-wide bus can be closed only once per test binary).
+var publishSelfTurnFrame = publishTransitionEvent
 
 // noteDoneEmitted records that emitTurn already delivered this completion so
 // emitDoneSignals (which reads the hook file's done fields) does not emit a
 // second finished record, and mirrors it into the non-destructive completion
 // ledger that `session children` reads.
-func (d *TransitionDaemon) noteDoneEmitted(profile string, inst *Instance, sig DoneSignal, at time.Time) {
-	if d.lastDone[profile] == nil {
-		d.lastDone[profile] = map[string]DoneSignal{}
-	}
-	d.lastDone[profile][inst.ID] = sig
+func (d *TransitionDaemon) noteDoneEmitted(profile string, inst *Instance, sig DoneSignal, turnUUID string, at time.Time) {
+	d.rememberDone(profile, inst.ID, sig)
 	_ = WriteLedgerEntry(CompletionLedgerEntry{
 		ChildID:    inst.ID,
 		Profile:    profile,
@@ -199,7 +317,17 @@ func (d *TransitionDaemon) noteDoneEmitted(profile string, inst *Instance, sig D
 		Status:     sig.Status,
 		Summary:    sig.Summary,
 		FinishedAt: at,
+		TurnUUID:   turnUUID,
 	})
+}
+
+// rememberDone marks sig as the child's handled completion so the hook-file
+// path (emitDoneSignals) does not deliver or count it a second time.
+func (d *TransitionDaemon) rememberDone(profile, childID string, sig DoneSignal) {
+	if d.lastDone[profile] == nil {
+		d.lastDone[profile] = map[string]DoneSignal{}
+	}
+	d.lastDone[profile][childID] = sig
 }
 
 // parentTitleFor resolves the registered parent's title for config

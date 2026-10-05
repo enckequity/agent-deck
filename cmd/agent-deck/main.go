@@ -44,7 +44,7 @@ import (
 	"github.com/asheshgoplani/agent-deck/internal/web"
 )
 
-var Version = "1.16.25" // overridden at build time via -ldflags "-X main.Version=..."
+var Version = "1.16.26" // overridden at build time via -ldflags "-X main.Version=..."
 
 // Table column widths for list command output
 const (
@@ -88,6 +88,7 @@ func initTelemetrySettings() {
 	telemetry.SetEndpoint(cfg.Telemetry.Endpoint)
 	telemetry.SetPostHogKey(cfg.Telemetry.PostHogKey)
 	telemetry.SetConfigLevel(cfg.Telemetry.Level)
+	telemetry.SetConfigOwner(cfg.Telemetry.Owner)
 }
 
 // telemetrySignalClose flushes the TUI's pending telemetry (activity hour,
@@ -612,6 +613,9 @@ func main() {
 		case "inbox":
 			handleInbox(profile, args[1:])
 			return
+		case "msg":
+			handleMsg(profile, args[1:])
+			return
 		case "feedback":
 			handleFeedback(args[1:])
 			return
@@ -835,6 +839,11 @@ func main() {
 			return
 		}
 	}
+
+	// This process is the TUI or the web server and lives long enough to reuse
+	// one persistent channel per remote. One-shot CLI commands never get here,
+	// so they do not dial a channel they would drop on exit (#2481).
+	session.EnableRemoteChannels()
 
 	// [updates] auto_update_remotes: bring older remotes up to this version
 	// in the background. On by default (auto_update_remotes = false opts
@@ -1472,7 +1481,7 @@ var commandRegistry = map[string]bool{
 	"uninstall": true, "migrate-paths": true, "hook-handler": true,
 	"codex-notify": true, "hooks": true, "codex-hooks": true, "gemini-hooks": true,
 	"hermes-hooks": true, "cursor-hooks": true, "tmux-hooks": true, "pi-hooks": true, "deepseek": true, "notify-daemon": true,
-	"run-task": true, "inbox": true, "feedback": true, "telemetry": true,
+	"run-task": true, "inbox": true, "msg": true, "feedback": true, "telemetry": true,
 	"debug-dump": true, "version": true, "--version": true, "-v": true,
 	"help": true, "--help": true, "-h": true, "completion": true,
 	"__complete": true,
