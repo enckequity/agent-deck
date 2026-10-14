@@ -32,6 +32,12 @@ func runTestMain(m *testing.M) (code int) {
 	// resolving to the wrong sandbox). The inherited env is already off the
 	// real home, so data-safety is preserved by NOT re-isolating.
 	isHelperProcess := os.Getenv("AGENT_DECK_TASK6_HELPER_PROCESS") != ""
+	defer func() {
+		if err := cleanupChannelsCLIBinary(); err != nil {
+			fmt.Fprintf(os.Stderr, "cleanup CLI fixture: %v\n", err)
+			code = 1
+		}
+	}()
 
 	if !isHelperProcess {
 		// Build shared CLI fixture before HOME/XDG isolation so Go caches never
@@ -75,10 +81,6 @@ func runTestMain(m *testing.M) (code int) {
 
 	// Run tests
 	code = m.Run()
-	if err := cleanupChannelsCLIBinary(); err != nil {
-		fmt.Fprintf(os.Stderr, "cleanup CLI fixture: %v\n", err)
-		code = 1
-	}
 
 	// Cleanup: Kill any orphaned test sessions after tests complete
 	// This prevents RAM waste from lingering test sessions

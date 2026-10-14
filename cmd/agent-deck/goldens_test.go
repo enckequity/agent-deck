@@ -322,11 +322,6 @@ var scrubRules = []struct {
 	// dotted numbers in addresses or command examples.
 	// Process IDs / port numbers rendered as "pid 12345" or ":54321".
 	{regexp.MustCompile(`\bpid[ =]\d+\b`), "pid <PID>"},
-	// The goldens binary itself: goldensBinary() builds to a fresh
-	// os.MkdirTemp("", "ad-goldens-bin-") directory outside the sandbox HOME
-	// (it must survive t.TempDir() cleanup across every sub-test), and some
-	// commands (e.g. `hooks status`) echo argv[0]'s resolved path back.
-	{regexp.MustCompile(`/[^\s"]*ad-goldens-bin-[0-9]+/agent-deck(\.exe)?`), "<AGENT_DECK_BINARY>"},
 	// A live tmux session name: `internal/tmux.SessionPrefix` ("agentdeck_")
 	// plus a title slug plus a random hex suffix, assigned fresh every time
 	// a session actually starts/restarts in real tmux (storage-bytes
@@ -349,6 +344,13 @@ func scrubStorage(s, home string) string {
 }
 
 func scrubWithEpoch(s, home string, normalizeEpoch bool) string {
+	if channelsCLIBinPath != "" {
+		// Normalize the selected fixture, including an inherited binary path.
+		if real, err := filepath.EvalSymlinks(channelsCLIBinPath); err == nil {
+			s = strings.ReplaceAll(s, real, "<AGENT_DECK_BINARY>")
+		}
+		s = strings.ReplaceAll(s, channelsCLIBinPath, "<AGENT_DECK_BINARY>")
+	}
 	if home != "" {
 		// Resolve the longer macOS /private path before its /var alias.
 		if real, err := filepath.EvalSymlinks(home); err == nil && real != home {
