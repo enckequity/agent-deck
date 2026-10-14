@@ -110,8 +110,14 @@ func TestStartupCreationRollbackCLIRespectsWorktreeOwnership(t *testing.T) {
 			if code == 0 || !strings.Contains(stdout+stderr, "failed to configure MCPs") || !strings.Contains(stdout+stderr, "rolled back") {
 				t.Fatalf("wrong failure: code=%d stdout=%s stderr=%s", code, stdout, stderr)
 			}
-			if reuse && !strings.Contains(stderr, "Reusing existing worktree at "+existing) {
-				t.Fatalf("fixture did not exercise reuse: %s", stderr)
+			if reuse {
+				canonicalExisting, err := filepath.EvalSymlinks(existing)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(stderr, "Reusing existing worktree at "+canonicalExisting) {
+					t.Fatalf("fixture did not exercise reuse: %s", stderr)
+				}
 			}
 			listed, stderr, code := runAgentDeck(t, home, "list", "--json")
 			if code != 0 || strings.Contains(listed, "failed-query-fixture") {
