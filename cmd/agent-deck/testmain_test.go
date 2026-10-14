@@ -46,6 +46,26 @@ func runTestMain(m *testing.M) (code int) {
 			fmt.Fprintf(os.Stderr, "prepare CLI fixture: %v\n", err)
 			return 1
 		}
+		// Keep Go's caller-selected caches outside the isolated application HOME.
+		// Helper subprocesses inherit these values and need no Go tool lookup.
+		if os.Getenv("GOCACHE") == "" || os.Getenv("GOMODCACHE") == "" {
+			out, err := exec.Command("go", "env", "GOCACHE", "GOMODCACHE").Output()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "resolve test build caches: %v\n", err)
+				return 1
+			}
+			paths := strings.Split(strings.TrimSpace(string(out)), "\n")
+			if len(paths) != 2 {
+				fmt.Fprintf(os.Stderr, "resolve test build caches: expected two paths, got %q\n", out)
+				return 1
+			}
+			for i, key := range []string{"GOCACHE", "GOMODCACHE"} {
+				if err := os.Setenv(key, strings.TrimSpace(paths[i])); err != nil {
+					fmt.Fprintf(os.Stderr, "preserve %s: %v\n", key, err)
+					return 1
+				}
+			}
+		}
 		// Isolate HOME+XDG so agent-deck path resolution lands in a temp dir,
 		// never the real ~/.agent-deck (2026-06-04 data-loss incident, S5).
 		// Must run before anything resolves a path. See internal/testutil/homeenv.go.
