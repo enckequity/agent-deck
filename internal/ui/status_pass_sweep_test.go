@@ -14,6 +14,7 @@ import (
 
 // Drive the actual ten-worker sweep. Delayed per-instance env reads make the
 // sweep exceed ownership's TTL; a fresh pass per worker would repeat the scan.
+// A present empty binding keeps the separate negative-cache TTL out of this gate.
 func TestBackgroundStatusPassOwnershipLinear(t *testing.T) {
 	const n = 40
 	dir := t.TempDir()
@@ -46,7 +47,7 @@ show-environment)
  if [ "$#" = 3 ]; then
   printf 'CODEX_SESSION_ID=\n'
  else
-  case "$*" in *CODEX_SESSION_ID*) sleep 0.8;; esac
+  case "$*" in *CODEX_SESSION_ID*) sleep 0.8; printf 'CODEX_SESSION_ID=\n';; esac
  fi;;
 has-session) exit 0;;
 capture-pane) printf '⠋ Working (esc to interrupt)\n';;

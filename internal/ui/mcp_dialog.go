@@ -1031,13 +1031,12 @@ func (m *MCPDialog) renderEmptyStateHelp() string {
 		"",
 		helpStyle.Render("To add MCPs, edit:"),
 		pathStyle.Render("  " + userConfigPathForDisplay()),
+		helpStyle.Render(m.reopenHint()),
 		"",
 		helpStyle.Render("Example:"),
 		helpStyle.Render("  [mcps.example]"),
 		helpStyle.Render("  command = \"npx\""),
 		helpStyle.Render("  args = [\"-y\", \"@example/mcp\"]"),
-		"",
-		helpStyle.Render(m.reopenHint()),
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }

@@ -52,7 +52,10 @@ func TestSessionHandoffJSON_ParsesFlagsAndIncludesInfo(t *testing.T) {
 	if testing.Short() {
 		t.Skip("subprocess CLI test skipped in short mode")
 	}
-	home := t.TempDir()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	id, _ := seedHandoffSession(t, home)
 
 	stdout, stderr, code := runAgentDeck(t, home,
@@ -87,7 +90,10 @@ func TestSessionHandoffOut_WritesPromptAndProtectsTranscript(t *testing.T) {
 	if testing.Short() {
 		t.Skip("subprocess CLI test skipped in short mode")
 	}
-	home := t.TempDir()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	id, transcriptPath := seedHandoffSession(t, home)
 	outPath := filepath.Join(home, "handoff.txt")
 

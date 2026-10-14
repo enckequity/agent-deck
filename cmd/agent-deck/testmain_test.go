@@ -23,7 +23,7 @@ func TestMain(m *testing.M) {
 // way to guarantee the isolated TMUX_TMPDIR and HOME temp dirs are removed.
 // Skipping this leaked per-run temp dirs on every run — the 2026-06-07
 // pty-exhaustion incident class.
-func runTestMain(m *testing.M) int {
+func runTestMain(m *testing.M) (code int) {
 	// Helper subprocesses (e.g. the Task6 XDG help-path test) are spawned by a
 	// parent test that has ALREADY exported a safe, sandboxed HOME+XDG and set
 	// the specific XDG_*_HOME values the subprocess must observe. Re-running
@@ -32,6 +32,12 @@ func runTestMain(m *testing.M) int {
 	// resolving to the wrong sandbox). The inherited env is already off the
 	// real home, so data-safety is preserved by NOT re-isolating.
 	isHelperProcess := os.Getenv("AGENT_DECK_TASK6_HELPER_PROCESS") != ""
+	defer func() {
+		if err := cleanupChannelsCLIBinary(); err != nil {
+			fmt.Fprintf(os.Stderr, "cleanup CLI fixture: %v\n", err)
+			code = 1
+		}
+	}()
 
 	if !isHelperProcess {
 		// Build shared CLI fixture before HOME/XDG isolation so Go caches never
@@ -39,6 +45,26 @@ func runTestMain(m *testing.M) int {
 		if err := ensureChannelsCLIBinary(); err != nil {
 			fmt.Fprintf(os.Stderr, "prepare CLI fixture: %v\n", err)
 			return 1
+		}
+		// Keep Go's caller-selected caches outside the isolated application HOME.
+		// Helper subprocesses inherit these values and need no Go tool lookup.
+		if os.Getenv("GOCACHE") == "" || os.Getenv("GOMODCACHE") == "" {
+			out, err := exec.Command("go", "env", "GOCACHE", "GOMODCACHE").Output()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "resolve test build caches: %v\n", err)
+				return 1
+			}
+			paths := strings.Split(strings.TrimSpace(string(out)), "\n")
+			if len(paths) != 2 {
+				fmt.Fprintf(os.Stderr, "resolve test build caches: expected two paths, got %q\n", out)
+				return 1
+			}
+			for i, key := range []string{"GOCACHE", "GOMODCACHE"} {
+				if err := os.Setenv(key, strings.TrimSpace(paths[i])); err != nil {
+					fmt.Fprintf(os.Stderr, "preserve %s: %v\n", key, err)
+					return 1
+				}
+			}
 		}
 		// Isolate HOME+XDG so agent-deck path resolution lands in a temp dir,
 		// never the real ~/.agent-deck (2026-06-04 data-loss incident, S5).
@@ -53,7 +79,13 @@ func runTestMain(m *testing.M) int {
 	// commands operate on their temp repos instead of the real repository.
 	testutil.UnsetGitRepoEnv()
 	if !isHelperProcess {
-		isolatePackageHome("agent-deck-cmd-tests-home-*")
+		cleanupPackageHome := isolatePackageHome("agent-deck-cmd-tests-home-*")
+		defer func() {
+			if err := cleanupPackageHome(); err != nil {
+				fmt.Fprintf(os.Stderr, "cleanup package home: %v\n", err)
+				code = 1
+			}
+		}()
 	}
 
 	// Isolate the tmux socket. Without this, cmd-level tests spawn tmux
@@ -68,11 +100,7 @@ func runTestMain(m *testing.M) int {
 	os.Setenv("AGENTDECK_PROFILE", "_test")
 
 	// Run tests
-	code := m.Run()
-	if err := cleanupGoldensBinary(); err != nil {
-		fmt.Fprintf(os.Stderr, "cleanup goldens binary: %v\n", err)
-		code = 1
-	}
+	code = m.Run()
 
 	// Cleanup: Kill any orphaned test sessions after tests complete
 	// This prevents RAM waste from lingering test sessions
@@ -82,7 +110,7 @@ func runTestMain(m *testing.M) int {
 	return code
 }
 
-func isolatePackageHome(pattern string) {
+func isolatePackageHome(pattern string) func() error {
 	home, err := os.MkdirTemp("", pattern)
 	if err != nil {
 		panic(err)
@@ -96,6 +124,7 @@ func isolatePackageHome(pattern string) {
 	os.Unsetenv("XDG_DATA_HOME")
 	os.Unsetenv("XDG_CACHE_HOME")
 	os.Unsetenv("XDG_STATE_HOME")
+	return func() error { return os.RemoveAll(home) }
 }
 
 // cleanupTestSessions kills any tmux sessions created during testing.

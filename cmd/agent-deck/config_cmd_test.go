@@ -84,7 +84,11 @@ func TestConfigShowEffective(t *testing.T) {
 		if decoded.Worktree["default_location"] != "sibling" {
 			t.Errorf("worktree.default_location = %q, want sibling", decoded.Worktree["default_location"])
 		}
-		if decoded.Sources["default_location"] != filepath.Join(agentDeckDir, "config.toml") {
+		wantSource, err := filepath.EvalSymlinks(filepath.Join(agentDeckDir, "config.toml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decoded.Sources["default_location"] != wantSource {
 			t.Errorf("sources.default_location = %q, want the workspace-parent file", decoded.Sources["default_location"])
 		}
 	})

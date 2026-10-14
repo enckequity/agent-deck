@@ -18,7 +18,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -323,11 +322,6 @@ var scrubRules = []struct {
 	// dotted numbers in addresses or command examples.
 	// Process IDs / port numbers rendered as "pid 12345" or ":54321".
 	{regexp.MustCompile(`\bpid[ =]\d+\b`), "pid <PID>"},
-	// The goldens binary itself: goldensBinary() builds to a fresh
-	// os.MkdirTemp("", "ad-goldens-bin-") directory outside the sandbox HOME
-	// (it must survive t.TempDir() cleanup across every sub-test), and some
-	// commands (e.g. `hooks status`) echo argv[0]'s resolved path back.
-	{regexp.MustCompile(`/[^\s"]*ad-goldens-bin-[0-9]+/agent-deck(\.exe)?`), "<AGENT_DECK_BINARY>"},
 	// A live tmux session name: `internal/tmux.SessionPrefix` ("agentdeck_")
 	// plus a title slug plus a random hex suffix, assigned fresh every time
 	// a session actually starts/restarts in real tmux (storage-bytes
@@ -350,11 +344,19 @@ func scrubStorage(s, home string) string {
 }
 
 func scrubWithEpoch(s, home string, normalizeEpoch bool) string {
+	if channelsCLIBinPath != "" {
+		// Normalize the selected fixture, including an inherited binary path.
+		if real, err := filepath.EvalSymlinks(channelsCLIBinPath); err == nil {
+			s = strings.ReplaceAll(s, real, "<AGENT_DECK_BINARY>")
+		}
+		s = strings.ReplaceAll(s, channelsCLIBinPath, "<AGENT_DECK_BINARY>")
+	}
 	if home != "" {
-		s = strings.ReplaceAll(s, home, "<SANDBOX_HOME>")
+		// Resolve the longer macOS /private path before its /var alias.
 		if real, err := filepath.EvalSymlinks(home); err == nil && real != home {
 			s = strings.ReplaceAll(s, real, "<SANDBOX_HOME>")
 		}
+		s = strings.ReplaceAll(s, home, "<SANDBOX_HOME>")
 	}
 	for _, r := range scrubRules {
 		s = r.pattern.ReplaceAllString(s, r.repl)
@@ -375,64 +377,21 @@ func scrubWithEpoch(s, home string, normalizeEpoch bool) string {
 var (
 	goldensBinOnce sync.Once
 	goldensBinPath string
-	goldensBinDir  string
 	goldensBinErr  error
 )
 
 func goldensBinary(t *testing.T) string {
 	t.Helper()
 	goldensBinOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "ad-goldens-bin-")
-		if err != nil {
-			goldensBinErr = err
-			return
-		}
-		goldensBinDir = dir
-		bin := filepath.Join(dir, "agent-deck")
-		if runtime.GOOS == "windows" {
-			bin += ".exe"
-		}
-		goldensBinPath = bin
-		cmd := exec.Command("go", "build", "-o", bin, "./cmd/agent-deck")
-		cmd.Dir = goldensRepoRoot(t)
-		if out, buildErr := cmd.CombinedOutput(); buildErr != nil {
-			goldensBinErr = &buildFailure{err: buildErr, output: string(out)}
-			return
-		}
+		// TestMain builds this fixture before HOME isolation, using the real
+		// Go cache. A second build here would create a cold cache in test HOME.
+		goldensBinErr = ensureChannelsCLIBinary()
+		goldensBinPath = channelsCLIBinPath
 	})
 	if goldensBinErr != nil {
 		t.Fatalf("building goldens binary: %v", goldensBinErr)
 	}
 	return goldensBinPath
-}
-
-func cleanupGoldensBinary() error {
-	if goldensBinDir == "" {
-		return nil
-	}
-	if goldensBinPath != "" {
-		if err := os.Remove(goldensBinPath); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	return os.Remove(goldensBinDir)
-}
-
-type buildFailure struct {
-	err    error
-	output string
-}
-
-func (b *buildFailure) Error() string { return b.err.Error() + "\n" + b.output }
-
-func goldensRepoRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	// cmd/agent-deck -> repo root
-	return filepath.Clean(filepath.Join(dir, "..", ".."))
 }
 
 // --- sandbox ------------------------------------------------------------

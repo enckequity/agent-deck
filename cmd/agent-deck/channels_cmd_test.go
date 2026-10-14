@@ -16,6 +16,7 @@ import (
 // failing-test suite snappy while still catching real CLI regressions.
 var (
 	channelsCLIBinPath string
+	channelsCLIBinDir  string
 	channelsCLIBuildMu sync.Mutex
 	channelsCLIBuildOK bool
 )
@@ -39,6 +40,7 @@ func ensureChannelsCLIBinary() error {
 	if err != nil {
 		return fmt.Errorf("mkdir bin tmp: %w", err)
 	}
+	channelsCLIBinDir = binDir
 	bin := filepath.Join(binDir, "agent-deck-test")
 	build := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := build.CombinedOutput(); err != nil {
@@ -50,6 +52,15 @@ func ensureChannelsCLIBinary() error {
 		return err
 	}
 	return nil
+}
+
+// Remove only the fixture directory this process created. An inherited binary
+// belongs to its caller and remains available after this test process exits.
+func cleanupChannelsCLIBinary() error {
+	if channelsCLIBinDir == "" {
+		return nil
+	}
+	return os.RemoveAll(channelsCLIBinDir)
 }
 
 func channelsCLIBinary(t *testing.T) string {

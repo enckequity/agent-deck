@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asheshgoplani/agent-deck/internal/events"
 	"github.com/asheshgoplani/agent-deck/internal/session"
 	"github.com/asheshgoplani/agent-deck/internal/tmux"
 )
@@ -41,6 +43,22 @@ import (
 //     ended (Stop): on the FIRST poll after it
 //  4. acknowledged (the user looked at it)                  idle
 func TestAcceptance2473_SmallWorkflowLifecycle(t *testing.T) {
+	// Closing the event writer is process-wide, so this lifecycle owns a child
+	// process rather than closing admission for the remaining package tests.
+	if os.Getenv("AGENTDECK_LIFECYCLE_HELPER") != "1" {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, exe, "-test.run=^TestAcceptance2473_SmallWorkflowLifecycle$", "-test.timeout=3m")
+		cmd.Env = append(os.Environ(), "AGENTDECK_LIFECYCLE_HELPER=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("lifecycle child: %v\n%s", err, out)
+		}
+		return
+	}
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not available")
 	}
@@ -48,6 +66,11 @@ func TestAcceptance2473_SmallWorkflowLifecycle(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("AGENTDECK_PROFILE", "")
+	t.Cleanup(func() {
+		if err := events.CloseDefault(); err != nil {
+			t.Errorf("close lifecycle event writer: %v", err)
+		}
+	})
 
 	running := readAcceptanceFixture(t, "..", "..", "internal", "tmux", "testdata", "background_work", "workflow-running.txt")
 	finished := readAcceptanceFixture(t, "..", "..", "internal", "tmux", "testdata", "background_work", "workflow-finished.txt")
