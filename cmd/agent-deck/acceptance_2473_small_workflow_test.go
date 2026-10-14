@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asheshgoplani/agent-deck/internal/events"
 	"github.com/asheshgoplani/agent-deck/internal/session"
 	"github.com/asheshgoplani/agent-deck/internal/tmux"
 )
@@ -48,6 +49,11 @@ func TestAcceptance2473_SmallWorkflowLifecycle(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("AGENTDECK_PROFILE", "")
+	t.Cleanup(func() {
+		if err := events.CloseDefault(); err != nil {
+			t.Errorf("close lifecycle event writer: %v", err)
+		}
+	})
 
 	running := readAcceptanceFixture(t, "..", "..", "internal", "tmux", "testdata", "background_work", "workflow-running.txt")
 	finished := readAcceptanceFixture(t, "..", "..", "internal", "tmux", "testdata", "background_work", "workflow-finished.txt")

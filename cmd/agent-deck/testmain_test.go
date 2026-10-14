@@ -23,7 +23,7 @@ func TestMain(m *testing.M) {
 // way to guarantee the isolated TMUX_TMPDIR and HOME temp dirs are removed.
 // Skipping this leaked per-run temp dirs on every run — the 2026-06-07
 // pty-exhaustion incident class.
-func runTestMain(m *testing.M) int {
+func runTestMain(m *testing.M) (code int) {
 	// Helper subprocesses (e.g. the Task6 XDG help-path test) are spawned by a
 	// parent test that has ALREADY exported a safe, sandboxed HOME+XDG and set
 	// the specific XDG_*_HOME values the subprocess must observe. Re-running
@@ -53,7 +53,13 @@ func runTestMain(m *testing.M) int {
 	// commands operate on their temp repos instead of the real repository.
 	testutil.UnsetGitRepoEnv()
 	if !isHelperProcess {
-		isolatePackageHome("agent-deck-cmd-tests-home-*")
+		cleanupPackageHome := isolatePackageHome("agent-deck-cmd-tests-home-*")
+		defer func() {
+			if err := cleanupPackageHome(); err != nil {
+				fmt.Fprintf(os.Stderr, "cleanup package home: %v\n", err)
+				code = 1
+			}
+		}()
 	}
 
 	// Isolate the tmux socket. Without this, cmd-level tests spawn tmux
@@ -68,9 +74,9 @@ func runTestMain(m *testing.M) int {
 	os.Setenv("AGENTDECK_PROFILE", "_test")
 
 	// Run tests
-	code := m.Run()
-	if err := cleanupGoldensBinary(); err != nil {
-		fmt.Fprintf(os.Stderr, "cleanup goldens binary: %v\n", err)
+	code = m.Run()
+	if err := cleanupChannelsCLIBinary(); err != nil {
+		fmt.Fprintf(os.Stderr, "cleanup CLI fixture: %v\n", err)
 		code = 1
 	}
 
@@ -82,7 +88,7 @@ func runTestMain(m *testing.M) int {
 	return code
 }
 
-func isolatePackageHome(pattern string) {
+func isolatePackageHome(pattern string) func() error {
 	home, err := os.MkdirTemp("", pattern)
 	if err != nil {
 		panic(err)
@@ -96,6 +102,7 @@ func isolatePackageHome(pattern string) {
 	os.Unsetenv("XDG_DATA_HOME")
 	os.Unsetenv("XDG_CACHE_HOME")
 	os.Unsetenv("XDG_STATE_HOME")
+	return func() error { return os.RemoveAll(home) }
 }
 
 // cleanupTestSessions kills any tmux sessions created during testing.
